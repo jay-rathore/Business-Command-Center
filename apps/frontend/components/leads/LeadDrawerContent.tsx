@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { LeadListItem } from "@hpl/shared";
-import { useAddLeadActivity, useLeadDetail, useLeadStatuses } from "@/lib/query/useLeads";
+import { leadBusinessCardImageUrl, useAddLeadActivity, useLeadDetail, useLeadStatuses } from "@/lib/query/useLeads";
 import { useLeadQuotations, quotationPdfUrl } from "@/lib/query/useQuotations";
 import { SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -58,9 +58,16 @@ export function LeadDrawerContent({ data }: { data: LeadListItem }) {
           <Stat label="Source" value={lead.sources.length > 0 ? lead.sources.map((s) => s.name).join(", ") : "—"} />
         </section>
 
-        <Button type="button" size="sm" className="self-start" onClick={() => setQuotationDialogOpen(true)}>
-          Send Quotation
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button type="button" size="sm" className="self-start" onClick={() => setQuotationDialogOpen(true)}>
+            Send Quotation
+          </Button>
+          {detailQuery.data?.hasBusinessCardImage && (
+            <a href={leadBusinessCardImageUrl(lead.id)} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline">
+              View card image
+            </a>
+          )}
+        </div>
 
         <section className="flex flex-col gap-2">
           <h4 className="text-xs font-medium text-text-muted">Lead details</h4>
@@ -68,6 +75,8 @@ export function LeadDrawerContent({ data }: { data: LeadListItem }) {
           <DetailRow label="Location" value={`${lead.city}, ${lead.state}`} />
           <DetailRow label="Type" value={lead.leadType?.name ?? "—"} />
           <DetailRow label="Assigned to" value={lead.assignedExecName ?? "Unassigned"} />
+          {detailQuery.data?.website && <DetailRow label="Website" value={detailQuery.data.website} />}
+          {detailQuery.data?.address && <DetailRow label="Address" value={detailQuery.data.address} />}
           <DetailRow
             label="Next follow-up"
             value={lead.nextFollowUpAt ? new Date(lead.nextFollowUpAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}

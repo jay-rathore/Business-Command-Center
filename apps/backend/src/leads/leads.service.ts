@@ -1,11 +1,15 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import {
+  BusinessCardDraft,
+  DuplicateLeadMatch,
+  ExecutiveOption,
   FunnelStage,
   LeadDetail,
   LeadListItem,
   LeadsKpis,
   LeadStatusOption,
+  LeadTypeOption,
   PaginatedResponse,
   SourceBreakdownEntry,
 } from "@hpl/shared";
@@ -15,7 +19,14 @@ import { buildPaginatedResponse } from "../common/utils/paginate";
 import { startOfMonth } from "../common/utils/date";
 import { LeadsListQueryDto } from "./dto/leads-list-query.dto";
 import { CreateLeadActivityDto } from "./dto/create-activity.dto";
+import { ScanBusinessCardDto } from "./dto/scan-business-card.dto";
+import { CreateLeadFromCardDto } from "./dto/create-lead-from-card.dto";
 import { LeadScoringService } from "./lead-scoring.service";
+import { BusinessCardAiParserService } from "./business-card-ai-parser.service";
+import { BusinessCardImageService } from "./business-card-image.service";
+import { LeadCodingService } from "./lead-coding.service";
+
+const BUSINESS_CARD_SOURCE_NAME = "Business Card Scan";
 
 type LeadWithRelations = Prisma.LeadGetPayload<{
   include: { assignedExec: true; status: true; leadType: true; sources: { include: { leadSource: true } } };
@@ -33,6 +44,9 @@ export class LeadsService {
   constructor(
     @Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient,
     private readonly scoring: LeadScoringService,
+    private readonly cardParser: BusinessCardAiParserService,
+    private readonly cardImages: BusinessCardImageService,
+    private readonly coding: LeadCodingService,
   ) {}
 
   async findAll(query: LeadsListQueryDto): Promise<PaginatedResponse<LeadListItem>> {
@@ -79,6 +93,9 @@ export class LeadsService {
       ...this.toListItem(lead),
       notes: lead.notes,
       lostReason: lead.lostReason,
+      address: lead.address,
+      website: lead.website,
+      hasBusinessCardImage: !!lead.businessCardImagePath,
       activities: lead.activities.map((a) => ({
         id: a.id,
         type: a.type,
@@ -186,6 +203,77 @@ export class LeadsService {
     await this.scoring.recomputeOne(leadId);
 
     return this.findOne(leadId);
+  }
+
+  scanBusinessCard(dto: ScanBusinessCardDto): Promise<BusinessCardDraft> {
+    return this.cardParser.parse(dto.imageDataUrl);
+  }
+
+  async getLeadTypeOptions(): Promise<LeadTypeOption[]> {
+    const types = await this.prisma.leadType.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
+    return types.map((t) => ({ id: t.id, name: t.name }));
+  }
+
+  async getExecutiveOptions(): Promise<ExecutiveOption[]> {
+    const execs = await this.prisma.salesExecutive.findMany({ where: { status: "ACTIVE" }, orderBy: { name: "asc" } });
+    return execs.map((e) => ({ id: e.id, name: e.name }));
+  }
+
+  async checkDuplicates(phone: string, email: string | null): Promise<DuplicateLeadMatch[]> {
+    const rows = await this.prisma.lead.findMany({
+      where: { OR: [{ phone }, ...(email ? [{ email }] : [])] },
+      select: { id: true, name: true, leadCode: true, phone: true, email: true },
+      take: 5,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      leadCode: r.leadCode,
+      matchedOn: r.phone === phone ? ("phone" as const) : ("email" as const),
+    }));
+  }
+
+  async getBusinessCardImagePath(id: string): Promise<string> {
+    const lead = await this.prisma.lead.findUnique({ where: { id }, select: { businessCardImagePath: true } });
+    if (!lead?.businessCardImagePath) throw new NotFoundException("This lead has no saved business card image");
+    return lead.businessCardImagePath;
+  }
+
+  async createFromBusinessCard(dto: CreateLeadFromCardDto): Promise<LeadDetail> {
+    const leadCode = await this.coding.next();
+    const source = await this.prisma.leadSource.upsert({
+      where: { name: BUSINESS_CARD_SOURCE_NAME },
+      update: {},
+      create: { name: BUSINESS_CARD_SOURCE_NAME, score: 8 },
+    });
+
+    const lead = await this.prisma.lead.create({
+      data: {
+        leadCode,
+        name: dto.name,
+        company: dto.company ?? null,
+        phone: dto.phone,
+        email: dto.email ?? null,
+        website: dto.website ?? null,
+        address: dto.address ?? null,
+        state: dto.state,
+        city: dto.city,
+        leadTypeId: dto.leadTypeId ?? null,
+        assignedExecId: dto.assignedExecId ?? null,
+        statusId: dto.statusId ?? null,
+        notes: dto.notes ?? null,
+        lastActivityAt: new Date(),
+      },
+    });
+    await this.prisma.leadSourceOnLead.create({ data: { leadId: lead.id, leadSourceId: source.id } });
+
+    if (dto.saveImage && dto.imageDataUrl) {
+      const path = this.cardImages.save(lead.id, dto.imageDataUrl);
+      await this.prisma.lead.update({ where: { id: lead.id }, data: { businessCardImagePath: path } });
+    }
+
+    await this.scoring.recomputeOne(lead.id);
+    return this.findOne(lead.id);
   }
 
   private mapSort(sortBy: string | undefined, sortDir: "asc" | "desc"): Prisma.LeadOrderByWithRelationInput {

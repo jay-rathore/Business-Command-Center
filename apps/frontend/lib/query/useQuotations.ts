@@ -92,7 +92,7 @@ export function useCreateQuotation() {
 export function useSendQuotationWhatsApp() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; leadId: string } & SendWhatsAppRequest) =>
+    mutationFn: ({ id, leadId, ...body }: { id: string; leadId: string } & SendWhatsAppRequest) =>
       api.post<SendWhatsAppResponse>(`/api/quotations/${id}/send-whatsapp`, body),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["quotations", "detail", variables.id] });
@@ -106,7 +106,7 @@ export function useSendQuotationWhatsApp() {
 export function useSendQuotationEmail() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; leadId: string } & SendEmailRequest) =>
+    mutationFn: ({ id, leadId, ...body }: { id: string; leadId: string } & SendEmailRequest) =>
       api.post<SendEmailResponse>(`/api/quotations/${id}/send-email`, body),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["quotations", "detail", variables.id] });

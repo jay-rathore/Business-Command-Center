@@ -404,6 +404,9 @@ model Lead {
   convertedProjectId    String?
   convertedCustomerId   String?
   notes                 String?
+  address               String? // free-form; business-card scans are the first source that reliably has this
+  website               String?
+  businessCardImagePath String? // set only when the scanning user opted to save the source card image
 
   activities   LeadActivity[]
   attributions MarketingLeadAttribution[]
@@ -959,6 +962,13 @@ model CompanyProfile {
 // One fixed global counter row, incremented transactionally by QuotationNumberingService
 // to generate race-free sequential reference numbers (PI-2026-0001, ...).
 model QuotationCounter {
+  id  String @id @default("global")
+  seq Int    @default(0)
+}
+
+// Race-free sequence for CARD-<year>-<seq> codes issued to leads created via business-card
+// scanning — the first manual (non-CRM-sync) lead-creation path. Mirrors QuotationCounter.
+model LeadCounter {
   id  String @id @default("global")
   seq Int    @default(0)
 }

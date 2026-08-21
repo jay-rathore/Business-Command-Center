@@ -14,7 +14,9 @@ import { FunnelChart } from "@/components/shared/FunnelChart";
 import { RankedBarList } from "@/components/shared/RankedBarList";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { LeadStatusBadge } from "./LeadStatusBadge";
+import { ScanBusinessCardDialog } from "./ScanBusinessCardDialog";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 
 export function LeadsView({
@@ -28,6 +30,7 @@ export function LeadsView({
 }) {
   const { state, setPage, setSort, setQuery } = useTableState({ pageSize: 10, sortBy: "createdAt" });
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [scanDialogOpen, setScanDialogOpen] = useState(false);
   const debouncedQuery = useDebounce(state.q);
   const openDrawer = useDrawerStore((s) => s.open);
 
@@ -126,6 +129,9 @@ export function LeadsView({
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold text-text-primary">All Leads</h2>
+          <Button type="button" size="sm" onClick={() => setScanDialogOpen(true)}>
+            Scan Business Card
+          </Button>
         </div>
         <select
           value={statusFilter ?? "ALL"}
@@ -164,6 +170,8 @@ export function LeadsView({
           emptyMessage="No leads match your search."
         />
       </div>
+
+      <ScanBusinessCardDialog open={scanDialogOpen} onOpenChange={setScanDialogOpen} />
     </div>
   );
 }

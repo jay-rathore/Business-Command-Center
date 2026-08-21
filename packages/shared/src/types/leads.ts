@@ -49,6 +49,9 @@ export interface LeadActivityItem {
 export interface LeadDetail extends LeadListItem {
   notes: string | null;
   lostReason: string | null;
+  address: string | null;
+  website: string | null;
+  hasBusinessCardImage: boolean;
   activities: LeadActivityItem[];
 }
 
@@ -71,4 +74,47 @@ export interface FunnelStage {
 export interface SourceBreakdownEntry {
   source: LeadSourceOption;
   count: number;
+}
+
+export interface ExecutiveOption {
+  id: string;
+  name: string;
+}
+
+/** Structured fields extracted from a photographed/uploaded business card via OpenAI vision.
+ * Always a draft — the frontend must show it in an editable review step before a Lead is
+ * created; the extraction endpoint itself never writes to the database. */
+export interface BusinessCardDraft {
+  name: string;
+  company: string | null;
+  phone: string;
+  email: string | null;
+  website: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+}
+
+export interface DuplicateLeadMatch {
+  id: string;
+  name: string;
+  leadCode: string;
+  matchedOn: "phone" | "email";
+}
+
+export interface CreateLeadFromCardRequest {
+  name: string;
+  company?: string | null;
+  phone: string;
+  email?: string | null;
+  website?: string | null;
+  address?: string | null;
+  state: string;
+  city: string;
+  leadTypeId?: string | null;
+  assignedExecId?: string | null;
+  statusId?: string | null;
+  notes?: string | null;
+  saveImage: boolean;
+  imageDataUrl?: string | null;
 }

@@ -2,11 +2,16 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  BusinessCardDraft,
+  CreateLeadFromCardRequest,
+  DuplicateLeadMatch,
+  ExecutiveOption,
   FunnelStage,
   LeadDetail,
   LeadListItem,
   LeadsKpis,
   LeadStatusOption,
+  LeadTypeOption,
   PaginatedResponse,
   SourceBreakdownEntry,
 } from "@hpl/shared";
@@ -83,4 +88,51 @@ export function useAddLeadActivity() {
       queryClient.invalidateQueries({ queryKey: ["leads"] });
     },
   });
+}
+
+export function useLeadTypes() {
+  return useQuery({
+    queryKey: ["leads", "types"],
+    queryFn: () => api.get<LeadTypeOption[]>("/api/leads/types"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useLeadExecutives() {
+  return useQuery({
+    queryKey: ["leads", "executives"],
+    queryFn: () => api.get<ExecutiveOption[]>("/api/leads/executives"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useScanBusinessCard() {
+  return useMutation({
+    mutationFn: (imageDataUrl: string) => api.post<BusinessCardDraft>("/api/leads/business-card/scan", { imageDataUrl }),
+  });
+}
+
+export function useLeadDuplicates() {
+  return useMutation({
+    mutationFn: ({ phone, email }: { phone: string; email?: string | null }) => {
+      const params = new URLSearchParams({ phone });
+      if (email) params.set("email", email);
+      return api.get<DuplicateLeadMatch[]>(`/api/leads/duplicates?${params.toString()}`);
+    },
+  });
+}
+
+export function useCreateLeadFromCard() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateLeadFromCardRequest) => api.post<LeadDetail>("/api/leads", body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
+
+export function leadBusinessCardImageUrl(id: string): string {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+  return `${apiUrl}/api/leads/${id}/business-card-image`;
 }
