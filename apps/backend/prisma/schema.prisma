@@ -1,0 +1,1040 @@
+// HPL Maker — Business Owner Command Center
+// Full normalized schema per project-requirements Section 27.
+// Only the Phase 1 subset (Auth/RBAC, Dashboard, Sales/Order, Leads, Dealers, Projects, Products)
+// is wired to working APIs/UI right now — the rest of this schema exists so later phases
+// don't require a reshape. Soft-delete (deletedAt) is on "directory" entities; append-only
+// logs (Activity/AuditLog/Notification/OrderItem/AIInsight) are never soft-deleted.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────
+
+enum RoleName {
+  OWNER
+  SALES_MANAGER
+  SALES_EXECUTIVE
+  MARKETING_MANAGER
+  DEALER_MANAGER
+  ADMIN
+}
+
+enum PermissionAction {
+  READ
+  WRITE
+  DELETE
+  MANAGE
+}
+
+enum PermissionModule {
+  DASHBOARD
+  SALES
+  LEADS
+  MARKETING
+  SALES_TEAM
+  DEALERS
+  ARCHITECTS
+  BUILDERS
+  PROJECTS
+  CUSTOMERS
+  COMPLAINTS
+  WARRANTY
+  PRODUCTS
+  GEOGRAPHY
+  AI_INSIGHTS
+  NOTIFICATIONS
+  REPORTS
+  SETTINGS
+}
+
+enum Priority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  WHATSAPP
+  SITE_VISIT
+  NOTE
+  STATUS_CHANGE
+  FOLLOW_UP_SCHEDULED
+  SAMPLE_SENT
+  QUOTE_SENT
+  ORDER_PLACED
+}
+
+// LeadStatus/LeadSource/LeadType were fixed enums until the app connected to the real
+// HPL CRM, which has a much richer, staff-editable taxonomy (40/17/15 live values) that a
+// closed enum can't represent without silently losing data. They're now lookup tables
+// (below, near the Lead model) mirroring the CRM's own dynamic status/source/type rows.
+
+enum LeadStage {
+  OPEN
+  WON
+  LOST
+}
+
+enum DealerStatus {
+  ACTIVE
+  AT_RISK
+  INACTIVE
+  NEW
+}
+
+enum ProjectStage {
+  LEAD
+  DISCOVERY
+  SAMPLE
+  DESIGN_APPROVAL
+  QUOTATION
+  NEGOTIATION
+  ORDER
+  COMPLETED
+  LOST
+}
+
+enum ProjectCategory {
+  COMMERCIAL
+  RESIDENTIAL
+  INDUSTRIAL
+  INSTITUTIONAL
+  HOSPITALITY
+  RETAIL
+  DEALER_FACILITY
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  DISPATCHED
+  DELIVERED
+  CANCELLED
+}
+
+enum CampaignPlatform {
+  GOOGLE_ADS
+  META_ADS
+  WEBSITE
+  WHATSAPP
+  ORGANIC
+  OTHER
+}
+
+enum CampaignStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum TouchType {
+  FIRST_TOUCH
+  LAST_TOUCH
+}
+
+enum ComplaintStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum WarrantyClaimStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  INSPECTION
+  APPROVED
+  REJECTED
+  RESOLVED
+}
+
+enum NotificationType {
+  NEW_LEAD
+  MISSED_FOLLOW_UP
+  HIGH_VALUE_LEAD
+  HIGH_VALUE_PROJECT
+  INACTIVE_DEALER
+  DEALER_RISK
+  SALES_TARGET_RISK
+  MARKETING_BUDGET_WARNING
+  CAMPAIGN_PERFORMANCE_WARNING
+  COMPLAINT
+  WARRANTY_CLAIM
+  PROJECT_INACTIVITY
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  PERMISSION_CHANGE
+}
+
+enum InsightCategory {
+  SALES
+  MARKETING
+  LEADS
+  DEALERS
+  PROJECTS
+  CUSTOMERS
+  PRODUCTS
+}
+
+enum InsightType {
+  RISK
+  OPPORTUNITY
+}
+
+enum InsightStatus {
+  NEW
+  REVIEWED
+  DISMISSED
+  ACTIONED
+}
+
+enum CustomerType {
+  INDIVIDUAL
+  BUSINESS
+  DEALER_SELF
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SalesTargetScope {
+  COMPANY
+  SALES_EXECUTIVE
+  DEALER
+  PRODUCT_CATEGORY
+}
+
+enum TargetPeriodType {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  SEND_FAILED
+}
+
+enum QuotationInputMode {
+  MANUAL
+  CHAT_AI
+  VOICE_AI
+}
+
+enum QuotationEmailStatus {
+  SENT
+  FAILED
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Auth / RBAC  (Phase 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+model User {
+  id               String          @id @default(cuid())
+  email            String          @unique
+  passwordHash     String
+  name             String
+  phone            String?
+  roleId           String
+  role             Role            @relation(fields: [roleId], references: [id])
+  isActive         Boolean         @default(true)
+  lastLoginAt      DateTime?
+  refreshTokenHash String?
+  salesExecutive   SalesExecutive?
+  auditLogs        AuditLog[]
+  notifications    Notification[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deletedAt        DateTime?
+
+  @@index([roleId])
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  name        RoleName         @unique
+  description String?
+  isSystem    Boolean          @default(true)
+  users       User[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  code        String           @unique // e.g. "sales:read", "leads:write"
+  module      PermissionModule
+  action      PermissionAction
+  description String?
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sales org + Customers  (Phase 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+model SalesExecutive {
+  id           String           @id @default(cuid())
+  employeeCode String           @unique
+  userId       String?          @unique
+  user         User?            @relation(fields: [userId], references: [id])
+  name         String
+  email        String?
+  phone        String?
+  designation  String
+  state        String?
+  managerId    String?
+  manager      SalesExecutive?  @relation("ExecManager", fields: [managerId], references: [id])
+  reports      SalesExecutive[] @relation("ExecManager")
+  hireDate     DateTime?
+  status       EmployeeStatus   @default(ACTIVE)
+
+  leads             Lead[]
+  leadActivities    LeadActivity[]
+  dealerActivities  DealerActivity[]
+  projects          Project[]
+  projectActivities ProjectActivity[]
+  orders            Order[]
+  targets           SalesTarget[]
+  managedDealers    Dealer[]          @relation("DealerManager")
+  complaints        Complaint[]
+  warrantyClaims    WarrantyClaim[]
+  quotations        Quotation[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model Customer {
+  id                String       @id @default(cuid())
+  customerCode      String       @unique
+  name              String
+  companyName       String?
+  phone             String
+  email             String?
+  type              CustomerType
+  city              String
+  state             String
+  address           String?
+  firstPurchaseAt   DateTime?
+  lastPurchaseAt    DateTime?
+  lifetimeValue     Decimal      @default(0) @db.Decimal(14, 2) // cached; recomputed from Order sums
+  satisfactionScore Float?
+  notes             String?
+
+  orders         Order[]
+  projects       Project[]
+  complaints     Complaint[]
+  warrantyClaims WarrantyClaim[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([state, city])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Leads  (Phase 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Lead {
+  id                    String             @id @default(cuid())
+  crmId                 Int?               @unique // external HPL CRM lead id, for sync upserts
+  leadCode              String             @unique
+  name                  String
+  company               String?
+  phone                 String
+  email                 String?
+  sources               LeadSourceOnLead[]
+  campaignId            String?
+  campaign              MarketingCampaign? @relation(fields: [campaignId], references: [id])
+  referredByArchitectId String?
+  referredByArchitect   Architect?         @relation(fields: [referredByArchitectId], references: [id])
+  referredByBuilderId   String?
+  referredByBuilder     Builder?           @relation(fields: [referredByBuilderId], references: [id])
+  state                 String
+  city                  String
+  leadTypeId            String?
+  leadType              LeadType?          @relation(fields: [leadTypeId], references: [id])
+  assignedExecId        String?
+  assignedExec          SalesExecutive?    @relation(fields: [assignedExecId], references: [id])
+  statusId              String?
+  status                LeadStatus?        @relation(fields: [statusId], references: [id])
+  score                 Int                @default(0)
+  estimatedValue        Decimal?           @db.Decimal(14, 2)
+  nextFollowUpAt        DateTime?
+  lastActivityAt        DateTime?
+  wonAt                 DateTime?
+  lostAt                DateTime?
+  lostReason            String?
+  convertedProjectId    String?
+  convertedCustomerId   String?
+  notes                 String?
+
+  activities   LeadActivity[]
+  attributions MarketingLeadAttribution[]
+  quotations   Quotation[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([statusId])
+  @@index([leadTypeId])
+  @@index([assignedExecId])
+  @@index([state, city])
+}
+
+// Mirrors the CRM's own per-status row (name, stage, ordering) instead of a closed enum —
+// see the note near LeadStage above. `stage` classifies each real CRM status as an editable
+// OPEN/WON/LOST bucket (used by KPIs/funnel/scoring) without baking status names into code.
+model LeadStatus {
+  id        String    @id @default(cuid())
+  crmId     Int?      @unique
+  name      String    @unique
+  stage     LeadStage @default(OPEN)
+  score     Int       @default(5)
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  leads     Lead[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model LeadSource {
+  id        String             @id @default(cuid())
+  crmId     Int?               @unique
+  name      String             @unique
+  score     Int                @default(10)
+  isActive  Boolean            @default(true)
+  leads     LeadSourceOnLead[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+}
+
+// A Lead can carry multiple sources at once (e.g. both "Facebook" and "Google Ads"),
+// same as the CRM — this join table replaces what used to be a single scalar column.
+model LeadSourceOnLead {
+  leadId       String
+  lead         Lead       @relation(fields: [leadId], references: [id])
+  leadSourceId String
+  leadSource   LeadSource @relation(fields: [leadSourceId], references: [id])
+
+  @@id([leadId, leadSourceId])
+}
+
+model LeadType {
+  id        String   @id @default(cuid())
+  crmId     Int?     @unique
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  leads     Lead[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LeadActivity {
+  id            String          @id @default(cuid())
+  leadId        String
+  lead          Lead            @relation(fields: [leadId], references: [id])
+  type          ActivityType
+  note          String?
+  performedById String?
+  performedBy   SalesExecutive? @relation(fields: [performedById], references: [id])
+  occurredAt    DateTime        @default(now())
+  createdAt     DateTime        @default(now())
+
+  @@index([leadId, occurredAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Dealers  (Phase 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Dealer {
+  id                   String          @id @default(cuid())
+  dealerCode           String          @unique
+  name                 String
+  contactName          String?
+  phone                String
+  email                String?
+  city                 String
+  state                String
+  address              String?
+  status               DealerStatus    @default(NEW)
+  assignedManagerId    String?
+  assignedManager      SalesExecutive? @relation("DealerManager", fields: [assignedManagerId], references: [id])
+  joinedAt             DateTime
+  healthScore          Int? // 0-100, computed by DealerScoringService, cached
+  healthScoreBreakdown Json? // { orderFrequency, revenue, recentActivity, growth, recency } labels+values
+  healthScoreUpdatedAt DateTime?
+
+  orders         Order[]
+  activities     DealerActivity[]
+  projects       Project[]
+  targets        SalesTarget[]
+  complaints     Complaint[]
+  warrantyClaims WarrantyClaim[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([status])
+  @@index([state, city])
+}
+
+// NOTE: totalOrders / revenue / growth / lastOrder are NEVER stored columns —
+// always derived via Order aggregation in DealersService.
+
+model DealerActivity {
+  id            String          @id @default(cuid())
+  dealerId      String
+  dealer        Dealer          @relation(fields: [dealerId], references: [id])
+  type          ActivityType
+  note          String?
+  performedById String?
+  performedBy   SalesExecutive? @relation(fields: [performedById], references: [id])
+  occurredAt    DateTime        @default(now())
+  createdAt     DateTime        @default(now())
+
+  @@index([dealerId, occurredAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Architects / Builders  (schema now — /architects /builders UI is Phase 2)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Architect {
+  id             String    @id @default(cuid())
+  name           String
+  company        String?
+  city           String
+  state          String
+  phone          String?
+  email          String?
+  joinedAt       DateTime?
+  lastActivityAt DateTime?
+
+  projects Project[]
+  leads    Lead[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model Builder {
+  id             String    @id @default(cuid())
+  name           String
+  company        String?
+  city           String
+  state          String
+  phone          String?
+  email          String?
+  joinedAt       DateTime?
+  lastActivityAt DateTime?
+
+  projects Project[]
+  leads    Lead[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Projects  (Phase 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Project {
+  id              String          @id @default(cuid())
+  projectCode     String          @unique
+  name            String
+  customerId      String?
+  customer        Customer?       @relation(fields: [customerId], references: [id])
+  architectId     String?
+  architect       Architect?      @relation(fields: [architectId], references: [id])
+  builderId       String?
+  builder         Builder?        @relation(fields: [builderId], references: [id])
+  dealerId        String?
+  dealer          Dealer?         @relation(fields: [dealerId], references: [id])
+  salesExecId     String?
+  salesExec       SalesExecutive? @relation(fields: [salesExecId], references: [id])
+  city            String
+  state           String
+  category        ProjectCategory
+  typeLabel       String // e.g. "Office Park", "Villas"
+  estimatedValue  Decimal         @db.Decimal(14, 2)
+  expectedHplQty  Int?
+  stage           ProjectStage    @default(LEAD)
+  probability     Int             @default(10)
+  stageSince      DateTime        @default(now())
+  expectedCloseAt DateTime?
+  nextFollowUpAt  DateTime?
+  lastActivityAt  DateTime?
+  notes           String?
+
+  orders     Order[]
+  activities ProjectActivity[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([stage])
+  @@index([state, city])
+  @@index([salesExecId])
+}
+
+// weighted pipeline value = estimatedValue * probability/100 — computed, not stored.
+// "Quotation" is the QUOTATION stage value, not a separate table; Order.projectId
+// links an order back to the project it converted from.
+
+model ProjectActivity {
+  id            String          @id @default(cuid())
+  projectId     String
+  project       Project         @relation(fields: [projectId], references: [id])
+  type          ActivityType
+  fromStage     ProjectStage?
+  toStage       ProjectStage?
+  note          String?
+  performedById String?
+  performedBy   SalesExecutive? @relation(fields: [performedById], references: [id])
+  occurredAt    DateTime        @default(now())
+  createdAt     DateTime        @default(now())
+
+  @@index([projectId, occurredAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Products  (Phase 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+model ProductCategory {
+  id       String        @id @default(cuid())
+  name     String        @unique // Interior HPL / Exterior Cladding / Compact Laminate / Bathroom Cubicle — doubles as "HPL type"
+  products Product[]
+  targets  SalesTarget[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model ProductShade {
+  id         String    @id @default(cuid())
+  name       String    @unique // Walnut Brown, Ivory Matte, Onyx Black Marble...
+  hexPreview String?
+  products   Product[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model Product {
+  id         String          @id @default(cuid())
+  sku        String          @unique
+  name       String
+  categoryId String
+  category   ProductCategory @relation(fields: [categoryId], references: [id])
+  shadeId    String?
+  shade      ProductShade?   @relation(fields: [shadeId], references: [id])
+  design     String? // "Woodgrain", "Marble", "Solid", "Stone"
+  unitPrice  Decimal         @db.Decimal(10, 2)
+  isActive   Boolean         @default(true)
+
+  orderItems     OrderItem[]
+  complaints     Complaint[]
+  warrantyClaims WarrantyClaim[]
+  quotationItems QuotationItem[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([categoryId])
+  @@index([shadeId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Orders — the real transactional ledger Sales/Dealers/Products/Command Center
+// all read from  (Phase 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Order {
+  id             String          @id @default(cuid())
+  orderCode      String          @unique
+  customerId     String?
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+  dealerId       String?
+  dealer         Dealer?         @relation(fields: [dealerId], references: [id])
+  projectId      String?
+  project        Project?        @relation(fields: [projectId], references: [id])
+  salesExecId    String?
+  salesExec      SalesExecutive? @relation(fields: [salesExecId], references: [id])
+  status         OrderStatus     @default(CONFIRMED)
+  orderDate      DateTime        @default(now())
+  dispatchedAt   DateTime?
+  deliveredAt    DateTime?
+  subtotal       Decimal         @db.Decimal(14, 2)
+  discountAmount Decimal         @default(0) @db.Decimal(14, 2)
+  totalAmount    Decimal         @db.Decimal(14, 2)
+  state          String // denormalized copy for fast geo aggregation
+  city           String
+
+  items          OrderItem[]
+  warrantyClaims WarrantyClaim[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([orderDate])
+  @@index([dealerId])
+  @@index([customerId])
+  @@index([salesExecId])
+  @@index([state])
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Decimal  @db.Decimal(10, 2)
+  lineTotal Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sales Targets  (Phase 1 — backs Command Center / Sales "Target Achievement")
+// ─────────────────────────────────────────────────────────────────────────
+
+model SalesTarget {
+  id                String           @id @default(cuid())
+  scope             SalesTargetScope
+  salesExecutiveId  String?
+  salesExecutive    SalesExecutive?  @relation(fields: [salesExecutiveId], references: [id])
+  dealerId          String?
+  dealer            Dealer?          @relation(fields: [dealerId], references: [id])
+  productCategoryId String?
+  productCategory   ProductCategory? @relation(fields: [productCategoryId], references: [id])
+  periodType        TargetPeriodType
+  periodStart       DateTime
+  periodEnd         DateTime
+  targetRevenue     Decimal          @db.Decimal(14, 2)
+  targetOrders      Int?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([scope, periodStart, periodEnd])
+}
+
+// achievedRevenue is NEVER stored — always computed live from Order for the same period+scope.
+// Service-layer validation: exactly one of salesExecutiveId/dealerId/productCategoryId is set
+// when scope != COMPANY; all null when scope == COMPANY.
+
+// ─────────────────────────────────────────────────────────────────────────
+// Marketing  (schema now — /marketing UI is Phase 2)
+// ─────────────────────────────────────────────────────────────────────────
+
+model MarketingCampaign {
+  id        String           @id @default(cuid())
+  name      String
+  platform  CampaignPlatform
+  status    CampaignStatus   @default(ACTIVE)
+  spend     Decimal          @db.Decimal(12, 2)
+  startDate DateTime
+  endDate   DateTime?
+  notes     String?
+
+  leads        Lead[]
+  attributions MarketingLeadAttribution[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model MarketingLeadAttribution {
+  id         String            @id @default(cuid())
+  leadId     String
+  lead       Lead              @relation(fields: [leadId], references: [id])
+  campaignId String
+  campaign   MarketingCampaign @relation(fields: [campaignId], references: [id])
+  touchType  TouchType
+  occurredAt DateTime          @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Complaints / Warranty  (schema now — UI is Phase 3)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Complaint {
+  id            String          @id @default(cuid())
+  complaintCode String          @unique
+  customerId    String
+  customer      Customer        @relation(fields: [customerId], references: [id])
+  productId     String?
+  product       Product?        @relation(fields: [productId], references: [id])
+  dealerId      String?
+  dealer        Dealer?         @relation(fields: [dealerId], references: [id])
+  issue         String
+  priority      Priority
+  status        ComplaintStatus @default(OPEN)
+  assignedToId  String?
+  assignedTo    SalesExecutive? @relation(fields: [assignedToId], references: [id])
+  dueAt         DateTime?
+  resolvedAt    DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model WarrantyClaim {
+  id              String              @id @default(cuid())
+  claimCode       String              @unique
+  customerId      String
+  customer        Customer            @relation(fields: [customerId], references: [id])
+  productId       String
+  product         Product             @relation(fields: [productId], references: [id])
+  orderId         String?
+  order           Order?              @relation(fields: [orderId], references: [id])
+  dealerId        String?
+  dealer          Dealer?             @relation(fields: [dealerId], references: [id])
+  purchaseDate    DateTime
+  warrantyMonths  Int
+  claimDate       DateTime
+  status          WarrantyClaimStatus @default(SUBMITTED)
+  inspectionNotes String?
+  resolution      String?
+  assignedToId    String?
+  assignedTo      SalesExecutive?     @relation(fields: [assignedToId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Notifications / Audit / AI  (Notification + AuditLog wired in Phase 1;
+// AI Insights UI is Phase 4)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id           String            @id @default(cuid())
+  userId       String?
+  user         User?             @relation(fields: [userId], references: [id])
+  targetRole   RoleName? // broadcast to a role when userId is null
+  type         NotificationType
+  priority     Priority
+  title        String
+  message      String
+  linkModule   PermissionModule?
+  linkRecordId String?
+  isRead       Boolean           @default(false)
+  readAt       DateTime?
+  createdAt    DateTime          @default(now())
+
+  @@index([userId, isRead])
+}
+
+model AuditLog {
+  id          String           @id @default(cuid())
+  userId      String?
+  user        User?            @relation(fields: [userId], references: [id])
+  action      AuditAction
+  module      PermissionModule
+  recordId    String?
+  beforeValue Json?
+  afterValue  Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime         @default(now())
+
+  @@index([module, recordId])
+  @@index([userId, createdAt])
+}
+
+model AIInsight {
+  id                String            @id @default(cuid())
+  category          InsightCategory
+  type              InsightType
+  priority          Priority
+  headline          String
+  whatHappened      String
+  whyItHappened     String
+  businessImpact    String
+  recommendedAction String
+  confidence        Int
+  sourceRefModule   PermissionModule?
+  sourceRefId       String?
+  status            InsightStatus     @default(NEW)
+  generatedAt       DateTime          @default(now())
+  reviewedAt        DateTime?
+  createdAt         DateTime          @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Quotations — proforma-invoice generation + WhatsApp send from a Lead
+// ─────────────────────────────────────────────────────────────────────────
+
+// A reusable letterhead/bank-details preset ("Company Detail Template"), NOT a singleton —
+// the operator picks one per quotation (e.g. different branches/entities). The PDF's visual
+// layout is always the same fixed template (quotation.hbs); only this data block varies.
+model CompanyProfile {
+  id                           String  @id @default(cuid())
+  label                        String // e.g. "Default", "Shreenath Global - Mumbai Branch"
+  isDefault                    Boolean @default(false)
+  isActive                     Boolean @default(true)
+  name                         String
+  addressLine1                 String
+  addressLine2                 String?
+  city                         String
+  state                        String
+  phone                        String
+  email                        String?
+  gstin                        String
+  logoDataUrl                  String? // data: URI, small enough to inline into the PDF template directly
+  bankName                     String
+  bankAccountNumber            String
+  bankIfsc                     String
+  bankSwift                    String?
+  defaultTermsAndConditions    String // newline-separated, editable per-quotation after prefill
+  defaultAdvancePercent        Int     @default(50)
+  defaultBeforeDispatchPercent Int     @default(50)
+  validityDays                 Int     @default(30)
+
+  quotations Quotation[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+// One fixed global counter row, incremented transactionally by QuotationNumberingService
+// to generate race-free sequential reference numbers (PI-2026-0001, ...).
+model QuotationCounter {
+  id  String @id @default("global")
+  seq Int    @default(0)
+}
+
+model Quotation {
+  id               String         @id @default(cuid())
+  quotationCode    String         @unique
+  leadId           String
+  lead             Lead           @relation(fields: [leadId], references: [id])
+  companyProfileId String
+  companyProfile   CompanyProfile @relation(fields: [companyProfileId], references: [id])
+
+  // Customer details are snapshotted at generation time (not just a Lead FK lookup) so a
+  // quotation's printed content never drifts if the Lead record changes afterward.
+  customerName    String
+  customerCompany String?
+  customerAddress String
+  customerCity    String
+  customerState   String
+  customerGstin   String?
+  customerContact String
+
+  quotationDate DateTime @default(now())
+  validUntil    DateTime
+
+  subtotal    Decimal @db.Decimal(14, 2)
+  gstAmount   Decimal @db.Decimal(14, 2)
+  roundoff    Decimal @db.Decimal(14, 2)
+  totalAmount Decimal @db.Decimal(14, 2)
+
+  advancePercent        Int
+  beforeDispatchPercent Int
+  advanceAmount         Decimal @db.Decimal(14, 2)
+  beforeDispatchAmount  Decimal @db.Decimal(14, 2)
+
+  termsAndConditions String
+
+  status       QuotationStatus    @default(DRAFT)
+  inputMode    QuotationInputMode
+  rawInputText String? // the original chat/voice free text, for audit — null for MANUAL
+
+  pdfPath           String?
+  sentToPhone       String?
+  whatsappMessageId String?
+  sentAt            DateTime?
+
+  emailSentTo String?
+  emailSentAt DateTime?
+  emailStatus QuotationEmailStatus?
+
+  createdById String?
+  createdBy   SalesExecutive? @relation(fields: [createdById], references: [id])
+
+  items QuotationItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([leadId])
+}
+
+model QuotationItem {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id])
+  srNo        Int
+  productId   String?
+  product     Product?  @relation(fields: [productId], references: [id])
+  itemName    String
+  hsnCode     String?
+  quantity    Int
+  unitRate    Decimal   @db.Decimal(10, 2)
+  taxPercent  Decimal   @default(18) @db.Decimal(5, 2)
+  lineAmount  Decimal   @db.Decimal(14, 2)
+  lineTax     Decimal   @db.Decimal(14, 2)
+  lineTotal   Decimal   @db.Decimal(14, 2)
+
+  @@index([quotationId])
+}

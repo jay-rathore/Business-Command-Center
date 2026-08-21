@@ -1,0 +1,15 @@
+# Keeps the Docker build context small and avoids packaging npm workspace symlinks
+# (node_modules/@hpl/shared etc.) that break Docker's tar archiver on Windows.
+node_modules
+**/node_modules
+dist
+**/dist
+.next
+**/.next
+.git
+*.log
+npm-debug.log*
+.env
+.env.local
+coverage
+.turbo

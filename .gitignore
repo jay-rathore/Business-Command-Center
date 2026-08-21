@@ -1,0 +1,40 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# env
+.env
+.env.local
+.env.*.local
+
+# build output
+dist/
+build/
+.next/
+out/
+
+# prisma
+apps/backend/generated/
+
+# real customer PII pulled from the HPL CRM for the one-time backfill — never commit
+apps/backend/prisma/crm-snapshot/
+
+# generated quotation PDFs — contain customer PII, never commit
+apps/backend/uploads/
+
+# logs
+npm-debug.log*
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# testing
+coverage/

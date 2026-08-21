@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/* HPL Maker — Business Owner Command Center design tokens.
+   Carried over verbatim from the approved click-through prototype
+   (demo/command-center-standalone.html) so the production app matches the
+   already-signed-off look. Light palette only — the prototype's dark-mode
+   variant was explicitly removed/pinned to light (see project memory). */
+:root {
+  --bg: #f6f7f8;
+  --surface: #ffffff;
+  --surface-2: #eff1f3;
+  --surface-hover: #f2f4f6;
+  --border: #e2e5e9;
+  --border-strong: #cdd3d9;
+  --text-primary: #12161c;
+  --text-secondary: #525a64;
+  --text-muted: #89909a;
+  --accent: #008fbf;
+  --accent-strong: #00728f;
+  --accent-tint: #e1f1f6;
+  --accent-tint-strong: #cfeaf3;
+  --good: #1c8a5a;
+  --good-tint: #e4f3ec;
+  --warning: #b8790a;
+  --warning-tint: #fbf0dd;
+  --critical: #c23b3b;
+  --critical-tint: #fbe7e7;
+  --shadow-sm: 0 1px 2px rgba(18, 22, 28, 0.05);
+  --shadow-md: 0 4px 16px rgba(18, 22, 28, 0.07);
+  --shadow-lg: 0 16px 40px rgba(18, 22, 28, 0.14);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-tint: var(--accent-tint);
+  --color-accent-tint-strong: var(--accent-tint-strong);
+  --color-good: var(--good);
+  --color-good-tint: var(--good-tint);
+  --color-warning: var(--warning);
+  --color-warning-tint: var(--warning-tint);
+  --color-critical: var(--critical);
+  --color-critical-tint: var(--critical-tint);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --font-display: var(--font-archivo);
+  --font-body: var(--font-public-sans);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+}
+
+@keyframes sheet-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes sheet-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes sheet-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes sheet-slide-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.sheet-overlay[data-state="open"] {
+  animation: sheet-fade-in 200ms ease-out;
+}
+.sheet-overlay[data-state="closed"] {
+  animation: sheet-fade-out 150ms ease-in;
+}
+.sheet-content[data-state="open"] {
+  animation: sheet-slide-in 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sheet-content[data-state="closed"] {
+  animation: sheet-slide-out 200ms ease-in;
+}

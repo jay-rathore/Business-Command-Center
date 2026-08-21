@@ -1,0 +1,20 @@
+{
+  "name": "hpl-command-center",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "postinstall": "npm run build -w packages/shared",
+    "build:shared": "npm run build -w packages/shared",
+    "dev:backend": "npm run start:dev -w apps/backend",
+    "dev:frontend": "npm run dev -w apps/frontend",
+    "build:backend": "npm run build -w apps/backend",
+    "build:frontend": "npm run build -w apps/frontend",
+    "prisma:generate": "npm run prisma:generate -w apps/backend",
+    "prisma:migrate:dev": "npm run prisma:migrate:dev -w apps/backend",
+    "db:seed": "npm run db:seed -w apps/backend"
+  }
+}

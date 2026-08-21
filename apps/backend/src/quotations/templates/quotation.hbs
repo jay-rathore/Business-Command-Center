@@ -1,0 +1,206 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  @page { margin: 0; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 40px;
+    font-family: "Segoe UI", Arial, sans-serif;
+    color: #1a1a1a;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding-bottom: 16px;
+    border-bottom: 3px solid #b8863b;
+  }
+  .header img { height: 56px; width: auto; }
+  .header .company-name { font-size: 20px; font-weight: 700; color: #1a1a1a; }
+  .header .company-meta { font-size: 11px; color: #555; margin-top: 2px; }
+  .title-bar {
+    background: #1a1a1a;
+    color: #fff;
+    text-align: center;
+    padding: 8px 0;
+    margin-top: 18px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #ddd;
+    font-size: 12px;
+  }
+  .meta-row div span.label { color: #777; margin-right: 6px; }
+  .meta-row div span.value { font-weight: 600; }
+  .section-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #b8863b;
+    text-transform: uppercase;
+    margin-top: 18px;
+    margin-bottom: 6px;
+  }
+  .customer-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 24px;
+    padding: 10px 0;
+    border-top: 1px solid #ddd;
+    border-bottom: 1px solid #ddd;
+  }
+  .customer-grid .row { display: flex; justify-content: space-between; font-size: 12px; }
+  .customer-grid .row span.label { color: #777; }
+  .customer-grid .row span.value { font-weight: 600; text-align: right; }
+  table.items {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+  }
+  table.items th {
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 7px 8px;
+    text-align: left;
+  }
+  table.items th.num, table.items td.num { text-align: right; }
+  table.items td {
+    padding: 7px 8px;
+    border-bottom: 1px solid #eee;
+    font-size: 12px;
+  }
+  table.items tr:nth-child(even) td { background: #faf7f2; }
+  .totals {
+    width: 260px;
+    margin-left: auto;
+    margin-top: 10px;
+  }
+  .totals .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+  .totals .row.grand {
+    border-top: 2px solid #1a1a1a;
+    margin-top: 4px;
+    padding-top: 8px;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .payment-terms { margin-top: 8px; }
+  .payment-terms .row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }
+  .terms-list { margin: 6px 0 0; padding-left: 18px; font-size: 11px; color: #333; }
+  .terms-list li { margin-bottom: 3px; }
+  .bank-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 24px;
+    font-size: 12px;
+  }
+  .bank-grid .row { display: flex; justify-content: space-between; }
+  .bank-grid .row span.label { color: #777; }
+  .bank-grid .row span.value { font-weight: 600; }
+  .footer {
+    margin-top: 22px;
+    padding-top: 14px;
+    border-top: 3px solid #b8863b;
+    text-align: center;
+  }
+  .footer .thanks { font-size: 12px; font-weight: 600; color: #333; }
+  .footer .brand { font-size: 15px; font-weight: 800; letter-spacing: 2px; color: #b8863b; margin-top: 4px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    {{#if company.logoDataUrl}}<img src="{{company.logoDataUrl}}" alt="logo" />{{/if}}
+    <div>
+      <div class="company-name">{{company.name}}</div>
+      <div class="company-meta">
+        {{company.addressLine1}}{{#if company.addressLine2}}, {{company.addressLine2}}{{/if}}, {{company.city}}, {{company.state}}
+        &nbsp;|&nbsp; {{company.phone}}{{#if company.email}} &nbsp;|&nbsp; {{company.email}}{{/if}}
+        &nbsp;|&nbsp; GSTIN: {{company.gstin}}
+      </div>
+    </div>
+  </div>
+
+  <div class="title-bar">PROFORMA INVOICE</div>
+
+  <div class="meta-row">
+    <div><span class="label">Reference No.</span><span class="value">{{quotationCode}}</span></div>
+    <div><span class="label">Date</span><span class="value">{{quotationDateFormatted}}</span></div>
+    <div><span class="label">Valid Until</span><span class="value">{{validUntilFormatted}}</span></div>
+  </div>
+
+  <div class="section-title">Customer Details</div>
+  <div class="customer-grid">
+    <div class="row"><span class="label">Name</span><span class="value">{{customer.name}}</span></div>
+    <div class="row"><span class="label">Contact</span><span class="value">{{customer.contact}}</span></div>
+    {{#if customer.company}}<div class="row"><span class="label">Company</span><span class="value">{{customer.company}}</span></div>{{/if}}
+    {{#if customer.gstin}}<div class="row"><span class="label">GSTIN</span><span class="value">{{customer.gstin}}</span></div>{{/if}}
+    <div class="row"><span class="label">Address</span><span class="value">{{customer.address}}</span></div>
+    <div class="row"><span class="label">State</span><span class="value">{{customer.state}}, {{customer.city}}</span></div>
+  </div>
+
+  <div class="section-title">Items</div>
+  <table class="items">
+    <thead>
+      <tr>
+        <th>#</th><th>Item</th><th>HSN</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Tax</th><th class="num">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each items}}
+      <tr>
+        <td>{{srNo}}</td>
+        <td>{{itemName}}</td>
+        <td>{{hsnCode}}</td>
+        <td class="num">{{quantity}}</td>
+        <td class="num">{{unitRateFormatted}}</td>
+        <td class="num">{{taxPercent}}%</td>
+        <td class="num">{{lineTotalFormatted}}</td>
+      </tr>
+      {{/each}}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="row"><span>Subtotal</span><span>{{subtotalFormatted}}</span></div>
+    <div class="row"><span>GST</span><span>{{gstAmountFormatted}}</span></div>
+    <div class="row"><span>Roundoff</span><span>{{roundoffFormatted}}</span></div>
+    <div class="row grand"><span>TOTAL</span><span>{{totalAmountFormatted}}</span></div>
+  </div>
+
+  <div class="section-title">Payment Terms</div>
+  <div class="payment-terms">
+    <div class="row"><span>{{advancePercent}}% Advance</span><span>{{advanceAmountFormatted}}</span></div>
+    <div class="row"><span>{{beforeDispatchPercent}}% Before Dispatch</span><span>{{beforeDispatchAmountFormatted}}</span></div>
+  </div>
+
+  <div class="section-title">Terms &amp; Conditions</div>
+  <ol class="terms-list">
+    {{#each termsLines}}<li>{{this}}</li>{{/each}}
+  </ol>
+
+  <div class="section-title">Bank Details</div>
+  <div class="bank-grid">
+    <div class="row"><span class="label">Bank</span><span class="value">{{company.bankName}}</span></div>
+    <div class="row"><span class="label">A/C No.</span><span class="value">{{company.bankAccountNumber}}</span></div>
+    <div class="row"><span class="label">IFSC</span><span class="value">{{company.bankIfsc}}</span></div>
+    {{#if company.bankSwift}}<div class="row"><span class="label">SWIFT</span><span class="value">{{company.bankSwift}}</span></div>{{/if}}
+  </div>
+
+  <div class="footer">
+    <div class="thanks">THANK YOU FOR PURCHASING</div>
+    <div class="brand">HPLMAKER</div>
+  </div>
+</body>
+</html>
