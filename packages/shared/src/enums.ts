@@ -286,6 +286,7 @@ export const NAV_MODULES: NavModule[] = [
   { key: 'dashboard', label: 'Command Center', route: '/dashboard', phase: 1 },
   { key: 'sales', label: 'Sales', route: '/sales', phase: 1 },
   { key: 'leads', label: 'Leads', route: '/leads', phase: 1 },
+  { key: 'scan-card', label: 'Scan Business Card', route: '/scan-card', phase: 1 },
   { key: 'quotations', label: 'Quotations', route: '/quotations', phase: 1 },
   { key: 'marketing', label: 'Marketing', route: '/marketing', phase: 2 },
   { key: 'sales-team', label: 'Sales Team', route: '/sales-team', phase: 2 },
