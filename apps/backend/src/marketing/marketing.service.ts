@@ -125,7 +125,7 @@ export class MarketingService {
       // guard spend > 0 explicitly rather than relying on JSON.stringify turning Infinity into
       // null for zero-spend channels (Website/Organic).
       roas: revenue > 0 && spend > 0 ? revenue / spend : null,
-      source: campaign.metaCampaignId ? "live" : "demo",
+      source: campaign.metaCampaignId || campaign.googleCampaignId ? "live" : "demo",
       startDate: campaign.startDate.toISOString(),
       endDate: campaign.endDate?.toISOString() ?? null,
     };

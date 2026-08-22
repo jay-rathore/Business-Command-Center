@@ -70,3 +70,13 @@ export function useRecomputeMetaSync() {
     },
   });
 }
+
+export function useRecomputeGoogleAdsSync() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ processed: number; created: number; updated: number }>("/api/marketing/google-ads-sync/run"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["marketing"] });
+    },
+  });
+}

@@ -2,7 +2,7 @@
 
 import { RotateCw } from "lucide-react";
 import { CampaignListItem } from "@hpl/shared";
-import { useCampaignDetail, useRecomputeMetaSync } from "@/lib/query/useMarketing";
+import { useCampaignDetail, useRecomputeGoogleAdsSync, useRecomputeMetaSync } from "@/lib/query/useMarketing";
 import { SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { CampaignPlatformBadge } from "./CampaignPlatformBadge";
@@ -16,8 +16,11 @@ function formatDate(value: string | null): string {
 
 export function CampaignDrawerContent({ data }: { data: CampaignListItem }) {
   const detailQuery = useCampaignDetail(data.id);
-  const resync = useRecomputeMetaSync();
+  const metaResync = useRecomputeMetaSync();
+  const googleAdsResync = useRecomputeGoogleAdsSync();
   const campaign = detailQuery.data ?? data;
+  const resync = campaign.platform === "GOOGLE_ADS" ? googleAdsResync : metaResync;
+  const liveSourceLabel = campaign.platform === "GOOGLE_ADS" ? "Google Ads" : "Meta Ads";
 
   return (
     <>
@@ -42,7 +45,7 @@ export function CampaignDrawerContent({ data }: { data: CampaignListItem }) {
       <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-5">
         {campaign.source === "live" && (
           <div className="flex items-center justify-between rounded-sm bg-accent-tint px-3 py-2">
-            <p className="text-xs text-accent-strong">Live data synced from Meta Ads.</p>
+            <p className="text-xs text-accent-strong">Live data synced from {liveSourceLabel}.</p>
             <Button
               variant="ghost"
               size="sm"

@@ -90,8 +90,8 @@ export function MarketingView({
         <h1 className="font-display text-xl font-semibold text-text-primary">Marketing</h1>
         <p className="text-sm text-text-muted">Spend, CPL and ROAS across every acquisition channel</p>
         <p className="mt-1 text-xs text-text-muted">
-          Meta Ads is live data synced from your ad account. Google Ads, Website, WhatsApp, Organic and Other are
-          placeholder figures pending those integrations — look for the Live/Demo badge on each row.
+          Meta Ads and Google Ads are live data synced from your ad accounts. Website, WhatsApp, Organic and Other
+          are placeholder figures pending those integrations — look for the Live/Demo badge on each row.
         </p>
       </div>
 

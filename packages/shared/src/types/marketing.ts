@@ -40,3 +40,20 @@ export interface ChannelBreakdownEntry {
   leadsCount: number;
   campaignCount: number;
 }
+
+export interface SiteAnalyticsSummary {
+  totals: {
+    sessions: number;
+    activeUsers: number;
+    newUsers: number;
+    pageViews: number;
+    conversions: number;
+  };
+  series: Array<{ date: string; sessions: number; activeUsers: number; conversions: number }>;
+}
+
+export interface SearchConsoleSummary {
+  totals: { clicks: number; impressions: number; ctr: number; position: number };
+  series: Array<{ date: string; clicks: number; impressions: number }>;
+  topQueries: Array<{ query: string; clicks: number; impressions: number; ctr: number; position: number }>;
+}
