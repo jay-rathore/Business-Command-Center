@@ -9,6 +9,8 @@ import { HealthModule } from './health/health.module';
 import { ProductsModule } from './products/products.module';
 import { SalesModule } from './sales/sales.module';
 import { DealersModule } from './dealers/dealers.module';
+import { CustomersModule } from './customers/customers.module';
+import { MarketingModule } from './marketing/marketing.module';
 import { LeadsModule } from './leads/leads.module';
 import { ProjectsModule } from './projects/projects.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -32,6 +34,8 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     ProductsModule,
     SalesModule,
     DealersModule,
+    CustomersModule,
+    MarketingModule,
     LeadsModule,
     ProjectsModule,
     DashboardModule,

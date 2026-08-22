@@ -3,6 +3,8 @@ export * from './types/pagination';
 export * from './types/products';
 export * from './types/sales';
 export * from './types/dealers';
+export * from './types/customers';
+export * from './types/marketing';
 export * from './types/leads';
 export * from './types/projects';
 export * from './types/dashboard';

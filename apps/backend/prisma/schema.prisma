@@ -674,6 +674,7 @@ model Product {
   id         String          @id @default(cuid())
   sku        String          @unique
   name       String
+  wcId       Int?            @unique // WooCommerce product id (hplmaker.com) — set only for products.wc-sync-synced rows
   categoryId String
   category   ProductCategory @relation(fields: [categoryId], references: [id])
   shadeId    String?
@@ -785,14 +786,17 @@ model SalesTarget {
 // ─────────────────────────────────────────────────────────────────────────
 
 model MarketingCampaign {
-  id        String           @id @default(cuid())
-  name      String
-  platform  CampaignPlatform
-  status    CampaignStatus   @default(ACTIVE)
-  spend     Decimal          @db.Decimal(12, 2)
-  startDate DateTime
-  endDate   DateTime?
-  notes     String?
+  id            String           @id @default(cuid())
+  name          String
+  platform      CampaignPlatform
+  status        CampaignStatus   @default(ACTIVE)
+  spend         Decimal          @db.Decimal(12, 2)
+  metaCampaignId String?         @unique // Meta Graph API campaign id — set only for real META_ADS-synced rows
+  leadsCount    Int              @default(0) // real (Meta "lead" action) for synced rows, fabricated for seeded ones
+  revenue       Decimal          @default(0) @db.Decimal(12, 2) // fabricated-only — never set against real Meta spend, see meta-ads-sync.service.ts
+  startDate     DateTime
+  endDate       DateTime?
+  notes         String?
 
   leads        Lead[]
   attributions MarketingLeadAttribution[]

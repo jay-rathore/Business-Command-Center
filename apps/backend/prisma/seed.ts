@@ -1,5 +1,7 @@
 import {
   ActivityType,
+  CampaignPlatform,
+  CampaignStatus,
   CustomerType,
   DealerStatus,
   OrderStatus,
@@ -490,6 +492,66 @@ async function seedSalesTargets(execIds: string[]) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// M5b — Marketing campaigns (placeholder channels only — META_ADS is populated exclusively by
+// the real meta-ads-sync service, never seeded, so there's no collision between fabricated and
+// live rows).
+// ─────────────────────────────────────────────────────────────────────────
+
+const MARKETING_CAMPAIGNS: {
+  name: string;
+  platform: CampaignPlatform;
+  status: CampaignStatus;
+  spend: number;
+  leadsCount: number;
+  revenue: number;
+  daysAgoStart: number;
+  daysAgoEnd: number | null; // null = still running
+  notes?: string;
+}[] = [
+  // revenue is tuned to keep ROAS in a believable ~2-6x band for spend > 0 rows — early drafts
+  // implied 50-60x on some WhatsApp rows, which would undermine the whole demo's credibility.
+  { name: 'Google Search — HPL Cladding', platform: CampaignPlatform.GOOGLE_ADS, status: CampaignStatus.ACTIVE, spend: 42500, leadsCount: 118, revenue: 263500, daysAgoStart: 60, daysAgoEnd: null },
+  { name: 'Google Search — Interior Laminates', platform: CampaignPlatform.GOOGLE_ADS, status: CampaignStatus.ACTIVE, spend: 28900, leadsCount: 76, revenue: 167600, daysAgoStart: 45, daysAgoEnd: null },
+  { name: 'Google Display — Retargeting', platform: CampaignPlatform.GOOGLE_ADS, status: CampaignStatus.PAUSED, spend: 15200, leadsCount: 31, revenue: 65000, daysAgoStart: 90, daysAgoEnd: 20 },
+  { name: 'Website Direct Inquiries', platform: CampaignPlatform.WEBSITE, status: CampaignStatus.ACTIVE, spend: 0, leadsCount: 94, revenue: 587000, daysAgoStart: 180, daysAgoEnd: null, notes: 'Organic website contact-form submissions, no ad spend.' },
+  { name: 'Landing Page — Compact Laminate', platform: CampaignPlatform.WEBSITE, status: CampaignStatus.ACTIVE, spend: 0, leadsCount: 37, revenue: 214000, daysAgoStart: 75, daysAgoEnd: null },
+  { name: 'WhatsApp Broadcast — Festive Offer', platform: CampaignPlatform.WHATSAPP, status: CampaignStatus.ENDED, spend: 3200, leadsCount: 52, revenue: 14500, daysAgoStart: 40, daysAgoEnd: 25 },
+  { name: 'WhatsApp Catalog Outreach', platform: CampaignPlatform.WHATSAPP, status: CampaignStatus.ACTIVE, spend: 1800, leadsCount: 29, revenue: 7400, daysAgoStart: 30, daysAgoEnd: null },
+  { name: 'Organic — Instagram', platform: CampaignPlatform.ORGANIC, status: CampaignStatus.ACTIVE, spend: 0, leadsCount: 64, revenue: 267000, daysAgoStart: 200, daysAgoEnd: null },
+  { name: 'Organic — Facebook Page', platform: CampaignPlatform.ORGANIC, status: CampaignStatus.ACTIVE, spend: 0, leadsCount: 41, revenue: 158000, daysAgoStart: 200, daysAgoEnd: null },
+  { name: 'Organic — YouTube', platform: CampaignPlatform.ORGANIC, status: CampaignStatus.ACTIVE, spend: 0, leadsCount: 18, revenue: 72000, daysAgoStart: 150, daysAgoEnd: null },
+  { name: 'Trade Show — Mumbai Expo', platform: CampaignPlatform.OTHER, status: CampaignStatus.ENDED, spend: 185000, leadsCount: 63, revenue: 535000, daysAgoStart: 70, daysAgoEnd: 65 },
+  { name: 'Referral Program', platform: CampaignPlatform.OTHER, status: CampaignStatus.ACTIVE, spend: 25000, leadsCount: 22, revenue: 130000, daysAgoStart: 250, daysAgoEnd: null, notes: 'Cash incentive paid to dealers/customers for successful referrals.' },
+  { name: 'Print Ads — Local Newspaper', platform: CampaignPlatform.OTHER, status: CampaignStatus.PAUSED, spend: 38000, leadsCount: 14, revenue: 87000, daysAgoStart: 100, daysAgoEnd: 55 },
+];
+
+async function seedMarketingCampaigns() {
+  const existing = await prisma.marketingCampaign.count({ where: { metaCampaignId: null } });
+  if (existing > 0) {
+    console.log(`Marketing campaigns already seeded (${existing} placeholder rows) — skipping`);
+    return;
+  }
+
+  for (const entry of MARKETING_CAMPAIGNS) {
+    await prisma.marketingCampaign.create({
+      data: {
+        name: entry.name,
+        platform: entry.platform,
+        status: entry.status,
+        spend: entry.spend,
+        leadsCount: entry.leadsCount,
+        revenue: entry.revenue,
+        startDate: daysAgo(entry.daysAgoStart),
+        endDate: entry.daysAgoEnd !== null ? daysAgo(entry.daysAgoEnd) : null,
+        notes: entry.notes ?? null,
+      },
+    });
+  }
+
+  console.log(`Seeded ${MARKETING_CAMPAIGNS.length} placeholder marketing campaigns (Google Ads/Website/WhatsApp/Organic/Other — Meta Ads comes from the real sync)`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // M6 — Leads
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -933,6 +995,7 @@ async function main() {
   const customerIds = await seedCustomers();
   await seedOrders(execIds, dealerIds, customerIds);
   await seedSalesTargets(execIds);
+  await seedMarketingCampaigns();
 
   const architectIds = await seedArchitects();
   const builderIds = await seedBuilders();
