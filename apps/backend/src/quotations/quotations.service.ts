@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { ActivityType, Prisma } from "@prisma/client";
+import { ActivityType, IntegrationProvider, Prisma } from "@prisma/client";
 import {
   CompanyProfileOption,
   PaginatedResponse,
@@ -10,6 +10,9 @@ import {
 } from "@hpl/shared";
 import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
+import { TenantContext } from "../common/context/tenant-context";
+import { IntegrationConnectionsService } from "../integration-connections/integration-connections.service";
+import type { WhatsAppCredentials, EmailSmtpCredentials } from "../integration-connections/credential-types";
 import { buildPaginatedResponse } from "../common/utils/paginate";
 import { LeadsService } from "../leads/leads.service";
 import { CompanyProfilesService } from "../company-profiles/company-profiles.service";
@@ -31,6 +34,7 @@ export class QuotationsService {
     private readonly companyProfiles: CompanyProfilesService,
     private readonly whatsapp: WhatsAppService,
     private readonly email: EmailService,
+    private readonly integrationConnections: IntegrationConnectionsService,
     private readonly numbering: QuotationNumberingService,
     private readonly aiParser: QuotationAiParserService,
     private readonly pdf: QuotationPdfService,
@@ -131,6 +135,7 @@ export class QuotationsService {
   }
 
   async create(leadId: string, dto: CreateQuotationDto, createdById: string | null): Promise<QuotationDetail> {
+    const organizationId = TenantContext.get().organizationId;
     const [lead, companyProfile] = await Promise.all([
       this.getLeadForQuotation(leadId),
       this.companyProfiles.findOne(dto.companyProfileId),
@@ -203,6 +208,7 @@ export class QuotationsService {
 
     const row = await this.prisma.quotation.create({
       data: {
+        organizationId,
         quotationCode,
         leadId: lead.id,
         companyProfileId: companyProfile.id,
@@ -228,7 +234,9 @@ export class QuotationsService {
         rawInputText: dto.rawInputText,
         pdfPath,
         createdById,
-        items: { create: items },
+        // Nested writes bypass the org-scope Prisma extension (it only intercepts top-level
+        // model.method calls), so QuotationItem.organizationId must be set explicitly here.
+        items: { create: items.map((i) => ({ ...i, organizationId })) },
       },
       include: { items: { orderBy: { srNo: "asc" } } },
     });
@@ -237,6 +245,13 @@ export class QuotationsService {
   }
 
   async sendWhatsApp(id: string, phoneOverride: string | undefined): Promise<QuotationDetail> {
+    const organizationId = TenantContext.get().organizationId;
+    const credentials = await this.integrationConnections.getCredentials<WhatsAppCredentials>(
+      organizationId,
+      IntegrationProvider.WHATSAPP,
+    );
+    if (!credentials) throw new BadRequestException("WhatsApp isn't configured for this organization yet");
+
     const row = await this.prisma.quotation.findUnique({ where: { id }, include: { items: true, lead: true } });
     if (!row) throw new NotFoundException("Quotation not found");
     if (!row.pdfPath) throw new NotFoundException("Quotation has no generated PDF");
@@ -246,8 +261,9 @@ export class QuotationsService {
     const buffer = readFileSync(row.pdfPath);
 
     try {
-      const mediaId = await this.whatsapp.uploadMedia(buffer, `${row.quotationCode}.pdf`, "application/pdf");
+      const mediaId = await this.whatsapp.uploadMedia(credentials, buffer, `${row.quotationCode}.pdf`, "application/pdf");
       const messageId = await this.whatsapp.sendDocumentMessage(
+        credentials,
         phone,
         mediaId,
         `${row.quotationCode}.pdf`,
@@ -279,6 +295,13 @@ export class QuotationsService {
   }
 
   async sendEmail(id: string, emailOverride: string | undefined): Promise<QuotationDetail> {
+    const organizationId = TenantContext.get().organizationId;
+    const credentials = await this.integrationConnections.getCredentials<EmailSmtpCredentials>(
+      organizationId,
+      IntegrationProvider.EMAIL_SMTP,
+    );
+    if (!credentials) throw new BadRequestException("Email isn't configured for this organization yet");
+
     const row = await this.prisma.quotation.findUnique({ where: { id }, include: { items: true, lead: true } });
     if (!row) throw new NotFoundException("Quotation not found");
     if (!row.pdfPath) throw new NotFoundException("Quotation has no generated PDF");
@@ -290,7 +313,7 @@ export class QuotationsService {
     const buffer = readFileSync(row.pdfPath);
 
     try {
-      await this.email.sendQuotationEmail({
+      await this.email.sendQuotationEmail(credentials, {
         to,
         subject: `Your quotation ${row.quotationCode} from HPL Maker`,
         bodyText: `Hi ${row.customerName},\n\nPlease find attached your quotation ${row.quotationCode}, valid until ${row.validUntil.toDateString()}.\n\nThank you for considering HPL Maker.`,

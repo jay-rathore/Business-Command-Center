@@ -14,6 +14,7 @@ import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
 import { buildPaginatedResponse } from "../common/utils/paginate";
 import { daysAgo, startOfMonth, startOfMonthsAgo } from "../common/utils/date";
 import { SalesTableQueryDto } from "./dto/sales-query.dto";
+import { TenantContext } from "../common/context/tenant-context";
 
 const NOT_CANCELLED: Prisma.OrderWhereInput = { status: { not: OrderStatus.CANCELLED } };
 
@@ -62,7 +63,11 @@ export class SalesService {
     const trunc = granularity === "daily" ? "day" : granularity === "weekly" ? "week" : "month";
     const daysBack = granularity === "daily" ? 30 : granularity === "weekly" ? 90 : 365;
     const startDate = daysAgo(daysBack);
+    const organizationId = TenantContext.get().organizationId;
 
+    // Raw SQL bypasses the org-scope Prisma extension (same reason "deletedAt IS NULL" is
+    // inlined manually here instead of relying on soft-delete.extension.ts) — organizationId
+    // must be filtered explicitly.
     const rows = await this.prisma.$queryRaw<{ bucket: Date; revenue: unknown; orders: bigint }[]>`
       SELECT date_trunc(${trunc}, "orderDate") AS bucket,
              COALESCE(SUM("totalAmount"), 0) AS revenue,
@@ -71,6 +76,7 @@ export class SalesService {
       WHERE "orderDate" >= ${startDate}
         AND "status" != 'CANCELLED'
         AND "deletedAt" IS NULL
+        AND "organizationId" = ${organizationId}
       GROUP BY bucket
       ORDER BY bucket ASC
     `;

@@ -16,12 +16,14 @@ import { ProjectsModule } from './projects/projects.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { CompanyProfilesModule } from './company-profiles/company-profiles.module';
+import { IntegrationConnectionsModule } from './integration-connections/integration-connections.module';
 import { WhatsAppModule } from './integrations/whatsapp/whatsapp.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
+import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 
 @Module({
   imports: [
@@ -42,6 +44,7 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     WhatsAppModule,
     CompanyProfilesModule,
     QuotationsModule,
+    IntegrationConnectionsModule,
   ],
   providers: [
     // Order matters: JwtAuthGuard populates req.user first, then Roles/Permissions guards read it.
@@ -49,6 +52,9 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
+    // TenantContextInterceptor must be registered first: it's the outermost interceptor,
+    // so AuditLogInterceptor's org-scoped AuditLog write below runs inside its context.
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditLogInterceptor },
   ],
 })

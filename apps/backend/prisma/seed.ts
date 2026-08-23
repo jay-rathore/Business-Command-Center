@@ -16,9 +16,16 @@ import * as bcrypt from 'bcrypt';
 import { ROLE_PERMISSION_MATRIX, expandActions, permissionCode } from '../src/rbac/role-permission-matrix';
 import { computeLeadScore } from '../src/leads/lead-scoring.util';
 
+// A bare, unextended PrismaClient — the org-scope Prisma extension (see
+// src/prisma/org-scope.extension.ts) reads the current tenant from AsyncLocalStorage, which
+// only exists inside an HTTP request; a one-off seed script has no request, so every call
+// below sets `organizationId` explicitly instead of relying on that extension.
 const prisma = new PrismaClient();
 
 const DEMO_PASSWORD = 'Passw0rd!123';
+
+const ORG_SLUG = 'hpl-maker';
+const ORG_NAME = 'HPL Maker';
 
 // Fixed-seed PRNG (mulberry32) so re-seeding produces the same "random" demo dataset —
 // reproducible without hand-typing every row.
@@ -51,6 +58,18 @@ function daysAgo(days: number): Date {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 }
 
+// HPL Maker is tenant #1 — see [[project_saas_multitenant_roadmap]]. Every other seed
+// function below takes organizationId and stamps it onto every row it creates.
+async function seedOrganization(): Promise<string> {
+  const org = await prisma.organization.upsert({
+    where: { slug: ORG_SLUG },
+    update: { name: ORG_NAME },
+    create: { slug: ORG_SLUG, name: ORG_NAME },
+  });
+  console.log(`Seeded organization "${org.name}" (${org.id})`);
+  return org.id;
+}
+
 const DEMO_USERS: { email: string; name: string; role: RoleName; designation?: string }[] = [
   { email: 'owner@hplmaker.demo', name: 'Rajesh Kulkarni', role: RoleName.OWNER },
   { email: 'admin@hplmaker.demo', name: 'System Admin', role: RoleName.ADMIN },
@@ -65,6 +84,7 @@ const DEMO_USERS: { email: string; name: string; role: RoleName; designation?: s
   { email: 'dealer.manager@hplmaker.demo', name: 'Karan Malhotra', role: RoleName.DEALER_MANAGER },
 ];
 
+// Roles/Permissions are global system RBAC, shared across all tenants — not org-scoped.
 async function seedRolesAndPermissions(): Promise<Map<RoleName, string>> {
   const roleIdByName = new Map<RoleName, string>();
 
@@ -102,7 +122,7 @@ async function seedRolesAndPermissions(): Promise<Map<RoleName, string>> {
   return roleIdByName;
 }
 
-async function seedUsers(roleIdByName: Map<RoleName, string>) {
+async function seedUsers(organizationId: string, roleIdByName: Map<RoleName, string>) {
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
 
   for (const demoUser of DEMO_USERS) {
@@ -110,9 +130,10 @@ async function seedUsers(roleIdByName: Map<RoleName, string>) {
     if (!roleId) throw new Error(`Role not seeded: ${demoUser.role}`);
 
     const user = await prisma.user.upsert({
-      where: { email: demoUser.email },
+      where: { organizationId_email: { organizationId, email: demoUser.email } },
       update: { name: demoUser.name, roleId },
       create: {
+        organizationId,
         email: demoUser.email,
         name: demoUser.name,
         passwordHash,
@@ -125,6 +146,7 @@ async function seedUsers(roleIdByName: Map<RoleName, string>) {
         where: { userId: user.id },
         update: { name: demoUser.name, designation: demoUser.designation ?? 'Sales Executive' },
         create: {
+          organizationId,
           employeeCode: 'EMP-001',
           userId: user.id,
           name: demoUser.name,
@@ -194,30 +216,36 @@ const PRODUCT_CATALOG: { category: (typeof PRODUCT_CATEGORIES)[number]; shade: s
   { category: 'Bathroom Cubicle', shade: 'Sandstone Beige', code: '9059', unitPrice: 2870 },
 ];
 
-async function seedProductCatalog() {
+async function seedProductCatalog(organizationId: string) {
   const categoryIdByName = new Map<string, string>();
   for (const name of PRODUCT_CATEGORIES) {
-    const category = await prisma.productCategory.upsert({ where: { name }, update: {}, create: { name } });
+    const category = await prisma.productCategory.upsert({
+      where: { organizationId_name: { organizationId, name } },
+      update: {},
+      create: { organizationId, name },
+    });
     categoryIdByName.set(name, category.id);
   }
 
   const shadeIdByName = new Map<string, string>();
   for (const shade of PRODUCT_SHADES) {
     const row = await prisma.productShade.upsert({
-      where: { name: shade.name },
+      where: { organizationId_name: { organizationId, name: shade.name } },
       update: {},
-      create: { name: shade.name },
+      create: { organizationId, name: shade.name },
     });
     shadeIdByName.set(shade.name, row.id);
   }
 
   for (const entry of PRODUCT_CATALOG) {
     const shadeDesign = PRODUCT_SHADES.find((s) => s.name === entry.shade)!.design;
+    const sku = `${entry.code} · ${entry.shade}`;
     await prisma.product.upsert({
-      where: { sku: `${entry.code} · ${entry.shade}` },
+      where: { organizationId_sku: { organizationId, sku } },
       update: {},
       create: {
-        sku: `${entry.code} · ${entry.shade}`,
+        organizationId,
+        sku,
         name: `${entry.shade} — ${entry.category}`,
         categoryId: categoryIdByName.get(entry.category)!,
         shadeId: shadeIdByName.get(entry.shade)!,
@@ -268,7 +296,7 @@ function randomContactName(): string {
 const DEALER_PREFIXES = ['Shree Balaji', 'New Ganesh', 'Royal', 'Deluxe', 'Prime', 'National', 'City', 'Metro', 'United', 'Om Sai', 'Laxmi', 'Vishal', 'Sunrise', 'Malwa', 'Golden'];
 const DEALER_SUFFIXES = ['Plywood & Laminates', 'Laminate House', 'Interiors & Décor', 'Building Materials', 'Timber & Laminates', 'Home Solutions', 'Plywood Traders', 'Laminate Gallery', 'Interior Hub', 'Trading Co.'];
 
-async function seedSalesExecutives(): Promise<string[]> {
+async function seedSalesExecutives(organizationId: string): Promise<string[]> {
   const roster: { employeeCode: string; name: string; designation: string; state: string }[] = [
     { employeeCode: 'EMP-002', name: 'Rohit Verma', designation: 'Sales Executive', state: 'Maharashtra' },
     { employeeCode: 'EMP-003', name: 'Priya Nair', designation: 'Sales Executive', state: 'Karnataka' },
@@ -277,14 +305,17 @@ async function seedSalesExecutives(): Promise<string[]> {
   ];
 
   const ids: string[] = [];
-  const existing = await prisma.salesExecutive.findUnique({ where: { employeeCode: 'EMP-001' } });
+  const existing = await prisma.salesExecutive.findUnique({
+    where: { organizationId_employeeCode: { organizationId, employeeCode: 'EMP-001' } },
+  });
   if (existing) ids.push(existing.id);
 
   for (const exec of roster) {
     const row = await prisma.salesExecutive.upsert({
-      where: { employeeCode: exec.employeeCode },
+      where: { organizationId_employeeCode: { organizationId, employeeCode: exec.employeeCode } },
       update: {},
       create: {
+        organizationId,
         employeeCode: exec.employeeCode,
         name: exec.name,
         designation: exec.designation,
@@ -299,7 +330,7 @@ async function seedSalesExecutives(): Promise<string[]> {
   return ids;
 }
 
-async function seedDealers(execIds: string[]): Promise<string[]> {
+async function seedDealers(organizationId: string, execIds: string[]): Promise<string[]> {
   const statusPool: [DealerStatus, number][] = [
     [DealerStatus.ACTIVE, 60],
     [DealerStatus.NEW, 15],
@@ -315,9 +346,10 @@ async function seedDealers(execIds: string[]): Promise<string[]> {
     const status = randWeighted(statusPool);
 
     const dealer = await prisma.dealer.upsert({
-      where: { dealerCode },
+      where: { organizationId_dealerCode: { organizationId, dealerCode } },
       update: {},
       create: {
+        organizationId,
         dealerCode,
         name: `${name} — ${city}`,
         contactName: randomContactName(),
@@ -339,7 +371,7 @@ async function seedDealers(execIds: string[]): Promise<string[]> {
 
 const CUSTOMER_COMPANY_SUFFIXES = ['Interiors Pvt Ltd', 'Modular Homes', 'Design Studio', 'Constructions', 'Realty Group', 'Developers', 'Interiors & Modular', 'Buildcon'];
 
-async function seedCustomers(): Promise<string[]> {
+async function seedCustomers(organizationId: string): Promise<string[]> {
   const ids: string[] = [];
   for (let i = 0; i < 40; i++) {
     const { state, city } = randomLocation();
@@ -352,9 +384,10 @@ async function seedCustomers(): Promise<string[]> {
     const customerCode = `CUS-${1001 + i}`;
 
     const customer = await prisma.customer.upsert({
-      where: { customerCode },
+      where: { organizationId_customerCode: { organizationId, customerCode } },
       update: {},
       create: {
+        organizationId,
         customerCode,
         name,
         companyName: type === 'INDIVIDUAL' ? null : `${name.split(' ')[1]} ${randChoice(CUSTOMER_COMPANY_SUFFIXES)}`,
@@ -372,11 +405,11 @@ async function seedCustomers(): Promise<string[]> {
   return ids;
 }
 
-async function seedOrders(execIds: string[], dealerIds: string[], customerIds: string[]) {
-  const products = await prisma.product.findMany();
+async function seedOrders(organizationId: string, execIds: string[], dealerIds: string[], customerIds: string[]) {
+  const products = await prisma.product.findMany({ where: { organizationId } });
   if (products.length === 0) throw new Error('Product catalog must be seeded before orders');
 
-  const existingOrders = await prisma.order.count();
+  const existingOrders = await prisma.order.count({ where: { organizationId } });
   if (existingOrders > 0) {
     console.log(`Orders already seeded (${existingOrders} rows) — skipping`);
     return;
@@ -402,7 +435,7 @@ async function seedOrders(execIds: string[], dealerIds: string[], customerIds: s
       const quantity = randInt(20, 180);
       const unitPrice = Number(product.unitPrice);
       const lineTotal = quantity * unitPrice;
-      return { productId, quantity, unitPrice, lineTotal };
+      return { organizationId, productId, quantity, unitPrice, lineTotal };
     });
 
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
@@ -411,6 +444,7 @@ async function seedOrders(execIds: string[], dealerIds: string[], customerIds: s
 
     await prisma.order.create({
       data: {
+        organizationId,
         orderCode: `ORD-${10000 + i}`,
         customerId,
         dealerId,
@@ -439,8 +473,8 @@ async function seedOrders(execIds: string[], dealerIds: string[], customerIds: s
   console.log(`Seeded ${created} orders with line items`);
 }
 
-async function seedSalesTargets(execIds: string[]) {
-  const existing = await prisma.salesTarget.count();
+async function seedSalesTargets(organizationId: string, execIds: string[]) {
+  const existing = await prisma.salesTarget.count({ where: { organizationId } });
   if (existing > 0) {
     console.log(`Sales targets already seeded (${existing} rows) — skipping`);
     return;
@@ -457,6 +491,7 @@ async function seedSalesTargets(execIds: string[]) {
     const periodEnd = new Date(now.getFullYear(), now.getMonth() - m + 1, 0, 23, 59, 59);
     await prisma.salesTarget.create({
       data: {
+        organizationId,
         scope: SalesTargetScope.COMPANY,
         periodType: TargetPeriodType.MONTHLY,
         periodStart,
@@ -475,6 +510,7 @@ async function seedSalesTargets(execIds: string[]) {
       const periodEnd = new Date(now.getFullYear(), now.getMonth() - m + 1, 0, 23, 59, 59);
       await prisma.salesTarget.create({
         data: {
+          organizationId,
           scope: SalesTargetScope.SALES_EXECUTIVE,
           salesExecutiveId: execId,
           periodType: TargetPeriodType.MONTHLY,
@@ -525,8 +561,8 @@ const MARKETING_CAMPAIGNS: {
   { name: 'Print Ads — Local Newspaper', platform: CampaignPlatform.OTHER, status: CampaignStatus.PAUSED, spend: 38000, leadsCount: 14, revenue: 87000, daysAgoStart: 100, daysAgoEnd: 55 },
 ];
 
-async function seedMarketingCampaigns() {
-  const existing = await prisma.marketingCampaign.count({ where: { metaCampaignId: null } });
+async function seedMarketingCampaigns(organizationId: string) {
+  const existing = await prisma.marketingCampaign.count({ where: { organizationId, metaCampaignId: null } });
   if (existing > 0) {
     console.log(`Marketing campaigns already seeded (${existing} placeholder rows) — skipping`);
     return;
@@ -535,6 +571,7 @@ async function seedMarketingCampaigns() {
   for (const entry of MARKETING_CAMPAIGNS) {
     await prisma.marketingCampaign.create({
       data: {
+        organizationId,
         name: entry.name,
         platform: entry.platform,
         status: entry.status,
@@ -574,71 +611,71 @@ const LEAD_NOTES = [
   'Wants samples couriered before finalizing.',
 ];
 
-// LeadStatus/LeadSource/LeadType are CRM-mirrored lookup tables, not enums (see schema.prisma
-// — the real HPL CRM has 40/17/15 staff-editable values). For local/demo seeding we still want
-// a small, deterministic set to generate synthetic leads against; the real HPL taxonomy is
-// loaded separately by the CRM backfill script, not by this seed.
-async function seedLeadTaxonomy() {
-  const existingStatuses = await prisma.leadStatus.count();
+// LeadStatus/LeadSource/LeadType are CRM-mirrored, per-tenant lookup tables, not enums (see
+// schema.prisma — the real HPL CRM has 40/17/15 staff-editable values). For local/demo seeding
+// we still want a small, deterministic set to generate synthetic leads against; the real HPL
+// taxonomy is loaded separately by the CRM backfill script, not by this seed.
+async function seedLeadTaxonomy(organizationId: string) {
+  const existingStatuses = await prisma.leadStatus.count({ where: { organizationId } });
   if (existingStatuses === 0) {
     await prisma.leadStatus.createMany({
       data: [
-        { name: 'New', stage: 'OPEN', score: 5, sortOrder: 10 },
-        { name: 'Contacted', stage: 'OPEN', score: 10, sortOrder: 20 },
-        { name: 'Qualified', stage: 'OPEN', score: 18, sortOrder: 30 },
-        { name: 'Meeting', stage: 'OPEN', score: 22, sortOrder: 40 },
-        { name: 'Proposal', stage: 'OPEN', score: 26, sortOrder: 50 },
-        { name: 'Negotiation', stage: 'OPEN', score: 30, sortOrder: 60 },
-        { name: 'Won', stage: 'WON', score: 30, sortOrder: 70 },
-        { name: 'Lost', stage: 'LOST', score: 0, sortOrder: 0 },
+        { organizationId, name: 'New', stage: 'OPEN', score: 5, sortOrder: 10 },
+        { organizationId, name: 'Contacted', stage: 'OPEN', score: 10, sortOrder: 20 },
+        { organizationId, name: 'Qualified', stage: 'OPEN', score: 18, sortOrder: 30 },
+        { organizationId, name: 'Meeting', stage: 'OPEN', score: 22, sortOrder: 40 },
+        { organizationId, name: 'Proposal', stage: 'OPEN', score: 26, sortOrder: 50 },
+        { organizationId, name: 'Negotiation', stage: 'OPEN', score: 30, sortOrder: 60 },
+        { organizationId, name: 'Won', stage: 'WON', score: 30, sortOrder: 70 },
+        { organizationId, name: 'Lost', stage: 'LOST', score: 0, sortOrder: 0 },
       ],
     });
   }
-  const existingSources = await prisma.leadSource.count();
+  const existingSources = await prisma.leadSource.count({ where: { organizationId } });
   if (existingSources === 0) {
     await prisma.leadSource.createMany({
       data: [
-        { name: 'Google Ads', score: 18 },
-        { name: 'Meta Ads', score: 18 },
-        { name: 'Website', score: 18 },
-        { name: 'WhatsApp', score: 15 },
-        { name: 'Organic', score: 15 },
-        { name: 'Referral', score: 25 },
-        { name: 'Architect', score: 25 },
-        { name: 'Builder', score: 25 },
-        { name: 'Dealer', score: 25 },
-        { name: 'Walk-in', score: 8 },
+        { organizationId, name: 'Google Ads', score: 18 },
+        { organizationId, name: 'Meta Ads', score: 18 },
+        { organizationId, name: 'Website', score: 18 },
+        { organizationId, name: 'WhatsApp', score: 15 },
+        { organizationId, name: 'Organic', score: 15 },
+        { organizationId, name: 'Referral', score: 25 },
+        { organizationId, name: 'Architect', score: 25 },
+        { organizationId, name: 'Builder', score: 25 },
+        { organizationId, name: 'Dealer', score: 25 },
+        { organizationId, name: 'Walk-in', score: 8 },
       ],
     });
   }
-  const existingTypes = await prisma.leadType.count();
+  const existingTypes = await prisma.leadType.count({ where: { organizationId } });
   if (existingTypes === 0) {
     await prisma.leadType.createMany({
       data: [
-        { name: 'Retail' },
-        { name: 'Dealer' },
-        { name: 'Project' },
-        { name: 'Architect Referral' },
-        { name: 'Builder Referral' },
+        { organizationId, name: 'Retail' },
+        { organizationId, name: 'Dealer' },
+        { organizationId, name: 'Project' },
+        { organizationId, name: 'Architect Referral' },
+        { organizationId, name: 'Builder Referral' },
       ],
     });
   }
 
   return {
-    statuses: await prisma.leadStatus.findMany(),
-    sources: await prisma.leadSource.findMany(),
-    types: await prisma.leadType.findMany(),
+    statuses: await prisma.leadStatus.findMany({ where: { organizationId } }),
+    sources: await prisma.leadSource.findMany({ where: { organizationId } }),
+    types: await prisma.leadType.findMany({ where: { organizationId } }),
   };
 }
 
-async function seedLeads(execIds: string[], architectIds: string[] = [], builderIds: string[] = []) {
-  const existing = await prisma.lead.count();
+async function seedLeads(organizationId: string, execIds: string[], architectIds: string[] = [], builderIds: string[] = []) {
+  const existing = await prisma.lead.count({ where: { organizationId } });
   if (existing > 0) {
     console.log(`Leads already seeded (${existing} rows) — skipping`);
     return;
   }
 
-  const { statuses, sources, types } = await seedLeadTaxonomy();
+  const { statuses, sources, types } = await seedLeadTaxonomy(organizationId);
   const byName = <T extends { name: string }>(rows: T[], name: string) => rows.find((r) => r.name === name)!;
 
   const statusPool: [(typeof statuses)[number], number][] = [
@@ -708,12 +745,13 @@ async function seedLeads(execIds: string[], architectIds: string[] = [], builder
 
     const lead = await prisma.lead.create({
       data: {
+        organizationId,
         leadCode: `LD-${2000 + i}`,
         name,
         company: leadType.name === 'Retail' ? null : `${randChoice(LEAD_LAST_NAMES)} ${randChoice(LEAD_COMPANY_SUFFIXES)}`,
         phone: `+91 ${randInt(70000, 99999)}${randInt(10000, 99999)}`,
         email: null,
-        sources: { create: [{ leadSourceId: source.id }] },
+        sources: { create: [{ organizationId, leadSourceId: source.id }] },
         referredByArchitectId: source.name === 'Architect' && architectIds.length > 0 ? randChoice(architectIds) : null,
         referredByBuilderId: source.name === 'Builder' && builderIds.length > 0 ? randChoice(builderIds) : null,
         state,
@@ -732,6 +770,7 @@ async function seedLeads(execIds: string[], architectIds: string[] = [], builder
         createdAt,
         activities: {
           create: activityDates.map((occurredAt) => ({
+            organizationId,
             type: randChoice(activityTypePool),
             performedById: randChoice(execIds),
             occurredAt,
@@ -771,11 +810,11 @@ const BUILDER_FIRM_NAMES = [
   'Bluepeak Constructions', 'Novus Buildtech',
 ];
 
-async function seedArchitects(): Promise<string[]> {
-  const existing = await prisma.architect.count();
+async function seedArchitects(organizationId: string): Promise<string[]> {
+  const existing = await prisma.architect.count({ where: { organizationId } });
   if (existing > 0) {
     console.log(`Architects already seeded (${existing} rows) — skipping`);
-    return (await prisma.architect.findMany({ select: { id: true } })).map((a) => a.id);
+    return (await prisma.architect.findMany({ where: { organizationId }, select: { id: true } })).map((a) => a.id);
   }
 
   const ids: string[] = [];
@@ -783,6 +822,7 @@ async function seedArchitects(): Promise<string[]> {
     const { state, city } = randomLocation();
     const architect = await prisma.architect.create({
       data: {
+        organizationId,
         name: randomContactName(),
         company,
         city,
@@ -798,11 +838,11 @@ async function seedArchitects(): Promise<string[]> {
   return ids;
 }
 
-async function seedBuilders(): Promise<string[]> {
-  const existing = await prisma.builder.count();
+async function seedBuilders(organizationId: string): Promise<string[]> {
+  const existing = await prisma.builder.count({ where: { organizationId } });
   if (existing > 0) {
     console.log(`Builders already seeded (${existing} rows) — skipping`);
-    return (await prisma.builder.findMany({ select: { id: true } })).map((b) => b.id);
+    return (await prisma.builder.findMany({ where: { organizationId }, select: { id: true } })).map((b) => b.id);
   }
 
   const ids: string[] = [];
@@ -810,6 +850,7 @@ async function seedBuilders(): Promise<string[]> {
     const { state, city } = randomLocation();
     const builder = await prisma.builder.create({
       data: {
+        organizationId,
         name: randomContactName(),
         company,
         city,
@@ -876,8 +917,15 @@ const PROJECT_NOTES = [
   'Strong intent, expected to close this quarter.',
 ];
 
-async function seedProjects(execIds: string[], dealerIds: string[], customerIds: string[], architectIds: string[], builderIds: string[]) {
-  const existing = await prisma.project.count();
+async function seedProjects(
+  organizationId: string,
+  execIds: string[],
+  dealerIds: string[],
+  customerIds: string[],
+  architectIds: string[],
+  builderIds: string[],
+) {
+  const existing = await prisma.project.count({ where: { organizationId } });
   if (existing > 0) {
     console.log(`Projects already seeded (${existing} rows) — skipping`);
     return;
@@ -905,8 +953,9 @@ async function seedProjects(execIds: string[], dealerIds: string[], customerIds:
 
     const name = `${randChoice(LEAD_LAST_NAMES)} ${typeLabel} — ${city}`;
 
-    const project = await prisma.project.create({
+    await prisma.project.create({
       data: {
+        organizationId,
         projectCode: `PRJ-${String(i + 1).padStart(2, '0')}`,
         name,
         customerId: rng() < 0.6 ? randChoice(customerIds) : null,
@@ -930,6 +979,7 @@ async function seedProjects(execIds: string[], dealerIds: string[], customerIds:
         activities: {
           create: [
             {
+              organizationId,
               type: ActivityType.STATUS_CHANGE,
               toStage: stage,
               note: 'Project created',
@@ -947,12 +997,13 @@ async function seedProjects(execIds: string[], dealerIds: string[], customerIds:
 
 // Placeholder letterhead for the Quotations feature — the operator edits this (or adds more
 // Company Profile templates) via Settings once real GSTIN/bank details are available.
-async function seedCompanyProfile() {
-  const existing = await prisma.companyProfile.findFirst({ where: { isDefault: true } });
+async function seedCompanyProfile(organizationId: string) {
+  const existing = await prisma.companyProfile.findFirst({ where: { organizationId, isDefault: true } });
   if (existing) return;
 
   await prisma.companyProfile.create({
     data: {
+      organizationId,
       label: 'Default',
       isDefault: true,
       isActive: true,
@@ -983,24 +1034,25 @@ async function seedCompanyProfile() {
 }
 
 async function main() {
-  console.log('Seeding HPL Maker Command Center — Foundation (roles, permissions, users)...\n');
+  console.log('Seeding HPL Maker Command Center — Foundation (organization, roles, permissions, users)...\n');
 
+  const organizationId = await seedOrganization();
   const roleIdByName = await seedRolesAndPermissions();
-  await seedUsers(roleIdByName);
-  await seedProductCatalog();
-  await seedCompanyProfile();
+  await seedUsers(organizationId, roleIdByName);
+  await seedProductCatalog(organizationId);
+  await seedCompanyProfile(organizationId);
 
-  const execIds = await seedSalesExecutives();
-  const dealerIds = await seedDealers(execIds);
-  const customerIds = await seedCustomers();
-  await seedOrders(execIds, dealerIds, customerIds);
-  await seedSalesTargets(execIds);
-  await seedMarketingCampaigns();
+  const execIds = await seedSalesExecutives(organizationId);
+  const dealerIds = await seedDealers(organizationId, execIds);
+  const customerIds = await seedCustomers(organizationId);
+  await seedOrders(organizationId, execIds, dealerIds, customerIds);
+  await seedSalesTargets(organizationId, execIds);
+  await seedMarketingCampaigns(organizationId);
 
-  const architectIds = await seedArchitects();
-  const builderIds = await seedBuilders();
-  await seedLeads(execIds, architectIds, builderIds);
-  await seedProjects(execIds, dealerIds, customerIds, architectIds, builderIds);
+  const architectIds = await seedArchitects(organizationId);
+  const builderIds = await seedBuilders(organizationId);
+  await seedLeads(organizationId, execIds, architectIds, builderIds);
+  await seedProjects(organizationId, execIds, dealerIds, customerIds, architectIds, builderIds);
 
   console.log('\nDemo login credentials (all users share this password):');
   console.log(`  Password: ${DEMO_PASSWORD}\n`);

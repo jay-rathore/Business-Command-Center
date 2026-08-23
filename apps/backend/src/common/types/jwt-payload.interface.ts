@@ -5,6 +5,7 @@ import { RoleName } from '@hpl/shared';
  * if a role's permissions change, which is acceptable at this scale. */
 export interface JwtPayload {
   sub: string; // User.id
+  organizationId: string;
   email: string;
   roleId: string;
   roleName: RoleName;

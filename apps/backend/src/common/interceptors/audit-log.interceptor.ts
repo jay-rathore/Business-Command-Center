@@ -1,9 +1,17 @@
-import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common';
+import {
+  CallHandler,
+  ExecutionContext,
+  Inject,
+  Injectable,
+  Logger,
+  NestInterceptor,
+} from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { AuditAction, PermissionModule } from '@prisma/client';
 import { Request } from 'express';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PRISMA_EXTENDED_CLIENT } from '../../prisma/prisma-extended.provider';
+import type { ExtendedPrismaClient } from '../../prisma/prisma-extended.provider';
 import { CurrentUserData } from '../types/jwt-payload.interface';
 
 const METHOD_ACTION: Partial<Record<string, AuditAction>> = {
@@ -33,7 +41,7 @@ const ROUTE_MODULE: Partial<Record<string, PermissionModule>> = {
 export class AuditLogInterceptor implements NestInterceptor {
   private readonly logger = new Logger(AuditLogInterceptor.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest<Request & { user?: CurrentUserData }>();
@@ -52,6 +60,7 @@ export class AuditLogInterceptor implements NestInterceptor {
         this.prisma.auditLog
           .create({
             data: {
+              organizationId: req.user!.organizationId,
               userId: req.user?.sub ?? null,
               action,
               module,

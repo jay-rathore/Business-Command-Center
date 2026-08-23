@@ -5,6 +5,7 @@ import { DealerStatus, OrderStatus } from "@prisma/client";
 import { DealerHealthBreakdown } from "@hpl/shared";
 import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
+import { TenantContext, resolveDefaultOrganizationId } from "../common/context/tenant-context";
 import { daysAgo } from "../common/utils/date";
 
 const WEIGHTS = { recency: 0.3, frequency: 0.25, revenue: 0.25, growth: 0.2 };
@@ -31,13 +32,16 @@ export class DealerScoringService implements OnApplicationBootstrap {
 
   async onApplicationBootstrap() {
     // Ensures scores are populated immediately on a fresh seed/dev boot, rather than
-    // waiting for the nightly cron.
-    await this.recomputeAll();
+    // waiting for the nightly cron. Runs outside any HTTP request, so there's no JWT-derived
+    // organizationId to read — resolve the single tenant that exists today instead.
+    const organizationId = await resolveDefaultOrganizationId(this.prisma);
+    await TenantContext.run({ organizationId }, () => this.recomputeAll());
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
   async recomputeAllCron() {
-    await this.recomputeAll();
+    const organizationId = await resolveDefaultOrganizationId(this.prisma);
+    await TenantContext.run({ organizationId }, () => this.recomputeAll());
   }
 
   async recomputeAll(): Promise<number> {

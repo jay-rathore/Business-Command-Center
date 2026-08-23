@@ -22,7 +22,10 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "db:seed": "ts-node --transpile-only prisma/seed.ts",
-    "db:import-crm": "ts-node --transpile-only prisma/import-crm-snapshot.ts"
+    "db:import-crm": "ts-node --transpile-only prisma/import-crm-snapshot.ts",
+    "db:test-tenant:create": "ts-node --transpile-only prisma/manage-test-tenant.ts create",
+    "db:test-tenant:delete": "ts-node --transpile-only prisma/manage-test-tenant.ts delete",
+    "db:migrate-env-to-connections": "ts-node --transpile-only prisma/migrate-env-to-connections.ts"
   },
   "dependencies": {
     "@google-analytics/data": "^7.0.0",

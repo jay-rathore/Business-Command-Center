@@ -10,6 +10,7 @@ import {
 } from "@hpl/shared";
 import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
+import { TenantContext } from "../common/context/tenant-context";
 import { buildPaginatedResponse } from "../common/utils/paginate";
 import { ProjectsListQueryDto } from "./dto/projects-list-query.dto";
 import { UpdateProjectStageDto } from "./dto/update-stage.dto";
@@ -172,6 +173,7 @@ export class ProjectsService {
     const now = new Date();
     await this.prisma.projectActivity.create({
       data: {
+        organizationId: TenantContext.get().organizationId,
         projectId: id,
         type: ActivityType.STATUS_CHANGE,
         fromStage: project.stage,

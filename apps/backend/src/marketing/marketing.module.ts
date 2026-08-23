@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { IntegrationConnectionsModule } from "../integration-connections/integration-connections.module";
 import { MarketingController } from "./marketing.controller";
 import { MarketingService } from "./marketing.service";
 import { MetaAdsSyncController } from "./meta-ads-sync/meta-ads-sync.controller";
@@ -11,6 +12,7 @@ import { SearchConsoleSyncController } from "./search-console-sync/search-consol
 import { SearchConsoleSyncService } from "./search-console-sync/search-console-sync.service";
 
 @Module({
+  imports: [IntegrationConnectionsModule],
   controllers: [
     MarketingController,
     MetaAdsSyncController,

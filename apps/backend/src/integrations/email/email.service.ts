@@ -1,50 +1,43 @@
 import { Injectable, InternalServerErrorException, Logger } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { createTransport, Transporter } from "nodemailer";
+import { createTransport } from "nodemailer";
+import type { EmailSmtpCredentials } from "../../integration-connections/credential-types";
 
 /** Generic SMTP mailer — works with any provider (Gmail + App Password, Office365, a business
- * mailbox, or a transactional-email SMTP relay) rather than locking into one vendor's API, since
- * this channel exists specifically to be usable immediately without waiting on WhatsApp Business
- * verification. */
+ * mailbox, or a transactional-email SMTP relay) rather than locking into one vendor's API.
+ * Credentials are per-tenant (IntegrationConnection, provider EMAIL_SMTP) and passed in by the
+ * caller — deliberately not cached on the instance (this is a singleton provider shared across
+ * every tenant's requests, so caching one tenant's transporter would leak it to the next). */
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  private transporter: Transporter | undefined;
 
-  constructor(private readonly config: ConfigService) {}
-
-  private getTransporter(): Transporter {
-    if (!this.transporter) {
-      this.transporter = createTransport({
-        host: this.config.getOrThrow<string>("EMAIL_SMTP_HOST"),
-        port: Number(this.config.get<string>("EMAIL_SMTP_PORT") ?? "587"),
-        secure: this.config.get<string>("EMAIL_SMTP_SECURE") === "true",
-        auth: {
-          user: this.config.getOrThrow<string>("EMAIL_SMTP_USER"),
-          pass: this.config.getOrThrow<string>("EMAIL_SMTP_PASS"),
-        },
-      });
-    }
-    return this.transporter;
-  }
-
-  async sendQuotationEmail(params: {
-    to: string;
-    subject: string;
-    bodyText: string;
-    attachmentBuffer: Buffer;
-    attachmentFilename: string;
-  }): Promise<void> {
-    const fromAddress = this.config.getOrThrow<string>("EMAIL_FROM_ADDRESS");
-    const fromName = this.config.get<string>("EMAIL_FROM_NAME") ?? "HPL Maker";
+  async sendQuotationEmail(
+    credentials: EmailSmtpCredentials,
+    params: {
+      to: string;
+      subject: string;
+      bodyText: string;
+      attachmentBuffer: Buffer;
+      attachmentFilename: string;
+    },
+  ): Promise<void> {
+    const transporter = createTransport({
+      host: credentials.host,
+      port: credentials.port,
+      secure: credentials.secure,
+      auth: { user: credentials.user, pass: credentials.pass },
+    });
+    const fromName = credentials.fromName ?? credentials.fromAddress;
 
     try {
-      await this.getTransporter().sendMail({
-        from: `"${fromName}" <${fromAddress}>`,
+      await transporter.sendMail({
+        from: `"${fromName}" <${credentials.fromAddress}>`,
         to: params.to,
         subject: params.subject,
         text: params.bodyText,
-        attachments: [{ filename: params.attachmentFilename, content: params.attachmentBuffer, contentType: "application/pdf" }],
+        attachments: [
+          { filename: params.attachmentFilename, content: params.attachmentBuffer, contentType: "application/pdf" },
+        ],
       });
     } catch (err) {
       this.logger.error(`Email send failed: ${err instanceof Error ? err.message : err}`);

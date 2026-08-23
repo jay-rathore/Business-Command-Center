@@ -1,6 +1,6 @@
 import { Injectable, InternalServerErrorException, Logger } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { normalizeWhatsAppPhone } from "./phone.util";
+import type { WhatsAppCredentials } from "../../integration-connections/credential-types";
 
 interface WhatsAppMediaUploadResponse {
   id: string;
@@ -11,34 +11,30 @@ interface WhatsAppSendMessageResponse {
 }
 
 /** Thin wrapper around Meta's WhatsApp Cloud API (Graph API). Same native-`fetch` pattern as
- * CrmSyncService — no HTTP client module in this codebase to abstract over. Swapping from Meta's
- * free per-app test number to a client's verified business number later is a pure env-var
- * change (WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN / WHATSAPP_BUSINESS_ACCOUNT_ID) —
- * no code here changes. */
+ * CrmSyncService — no HTTP client module in this codebase to abstract over. Credentials are
+ * per-tenant (IntegrationConnection, provider WHATSAPP) and passed in by the caller — this
+ * service itself is stateless so it can't accidentally cache one tenant's token. */
 @Injectable()
 export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
 
-  constructor(private readonly config: ConfigService) {}
-
-  private get baseUrl(): string {
-    const version = this.config.get<string>("WHATSAPP_API_VERSION") ?? "v21.0";
-    const phoneNumberId = this.config.getOrThrow<string>("WHATSAPP_PHONE_NUMBER_ID");
-    return `https://graph.facebook.com/${version}/${phoneNumberId}`;
+  private baseUrl(credentials: WhatsAppCredentials): string {
+    return `https://graph.facebook.com/${credentials.apiVersion ?? "v21.0"}/${credentials.phoneNumberId}`;
   }
 
-  private get accessToken(): string {
-    return this.config.getOrThrow<string>("WHATSAPP_ACCESS_TOKEN");
-  }
-
-  async uploadMedia(buffer: Buffer, filename: string, mimeType: string): Promise<string> {
+  async uploadMedia(
+    credentials: WhatsAppCredentials,
+    buffer: Buffer,
+    filename: string,
+    mimeType: string,
+  ): Promise<string> {
     const form = new FormData();
     form.append("messaging_product", "whatsapp");
     form.append("file", new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
 
-    const res = await fetch(`${this.baseUrl}/media`, {
+    const res = await fetch(`${this.baseUrl(credentials)}/media`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${this.accessToken}` },
+      headers: { Authorization: `Bearer ${credentials.accessToken}` },
       body: form,
     });
     if (!res.ok) {
@@ -50,11 +46,17 @@ export class WhatsAppService {
     return data.id;
   }
 
-  async sendDocumentMessage(toPhone: string, mediaId: string, filename: string, caption?: string): Promise<string> {
-    const res = await fetch(`${this.baseUrl}/messages`, {
+  async sendDocumentMessage(
+    credentials: WhatsAppCredentials,
+    toPhone: string,
+    mediaId: string,
+    filename: string,
+    caption?: string,
+  ): Promise<string> {
+    const res = await fetch(`${this.baseUrl(credentials)}/messages`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.accessToken}`,
+        Authorization: `Bearer ${credentials.accessToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

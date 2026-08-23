@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { PRISMA_EXTENDED_CLIENT } from "../../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../../prisma/prisma-extended.provider";
+import { TenantContext, resolveDefaultOrganizationId } from "../../common/context/tenant-context";
 import { computeLeadScore } from "../lead-scoring.util";
 import { classifyStatusName, CRM_STATUS_EXCLUDED_DEPARTMENTS } from "./crm-status-classification";
 import { CrmLeadRaw, CrmLookupRow, mapCrmLead, mapCrmRep } from "./crm-lead-mapper";
@@ -41,12 +42,17 @@ export class CrmSyncService {
 
   @Cron(CronExpression.EVERY_30_MINUTES)
   async scheduledSync(): Promise<void> {
-    try {
-      const result = await this.syncRecent();
-      this.logger.log(`CRM sync: ${result.processed} leads processed (${result.created} new, ${result.updated} updated)`);
-    } catch (err) {
-      this.logger.error(`CRM sync failed: ${err instanceof Error ? err.message : err}`);
-    }
+    // Cron jobs run outside any HTTP request, so there's no JWT-derived organizationId to read —
+    // resolve the single tenant that exists today instead. See resolveDefaultOrganizationId.
+    const organizationId = await resolveDefaultOrganizationId(this.prisma);
+    await TenantContext.run({ organizationId }, async () => {
+      try {
+        const result = await this.syncRecent();
+        this.logger.log(`CRM sync: ${result.processed} leads processed (${result.created} new, ${result.updated} updated)`);
+      } catch (err) {
+        this.logger.error(`CRM sync failed: ${err instanceof Error ? err.message : err}`);
+      }
+    });
   }
 
   /** Pulls leads created in the last `daysBack` days and upserts them. Small, bounded result
@@ -66,8 +72,12 @@ export class CrmSyncService {
       if (!res.ok) throw new Error(`HPL CRM API returned ${res.status} for ${url}`);
       const data = (await res.json()) as CrmLeadListResponse;
 
+      const organizationId = TenantContext.get().organizationId;
       for (const raw of data.results) {
-        const existed = await this.prisma.lead.findUnique({ where: { crmId: raw.id }, select: { id: true } });
+        const existed = await this.prisma.lead.findUnique({
+          where: { organizationId_crmId: { organizationId, crmId: raw.id } },
+          select: { id: true },
+        });
         await this.upsertLead(raw);
         processed++;
         if (existed) updated++;
@@ -119,17 +129,18 @@ export class CrmSyncService {
       score,
     };
 
+    const organizationId = TenantContext.get().organizationId;
     const lead = await this.prisma.lead.upsert({
-      where: { crmId: mapped.crmId },
+      where: { organizationId_crmId: { organizationId, crmId: mapped.crmId } },
       update: commonData,
-      create: { crmId: mapped.crmId, leadCode: mapped.leadCode, createdAt: mapped.createdAt, ...commonData },
+      create: { organizationId, crmId: mapped.crmId, leadCode: mapped.leadCode, createdAt: mapped.createdAt, ...commonData },
     });
 
     // Sources can change between polls — simplest correct approach at this volume is replace-in-full.
     await this.prisma.leadSourceOnLead.deleteMany({ where: { leadId: lead.id } });
     if (sourceIds.length > 0) {
       await this.prisma.leadSourceOnLead.createMany({
-        data: sourceIds.map((leadSourceId) => ({ leadId: lead.id, leadSourceId })),
+        data: sourceIds.map((leadSourceId) => ({ organizationId, leadId: lead.id, leadSourceId })),
         skipDuplicates: true,
       });
     }
@@ -139,11 +150,12 @@ export class CrmSyncService {
     if (CRM_STATUS_EXCLUDED_DEPARTMENTS.has(detail.department_name ?? "")) return null;
     if (this.statusCache.has(detail.id)) return this.statusCache.get(detail.id)!;
 
-    let row = await this.prisma.leadStatus.findUnique({ where: { crmId: detail.id } });
-    if (!row) row = await this.prisma.leadStatus.findUnique({ where: { name: detail.name } });
+    const organizationId = TenantContext.get().organizationId;
+    let row = await this.prisma.leadStatus.findUnique({ where: { organizationId_crmId: { organizationId, crmId: detail.id } } });
+    if (!row) row = await this.prisma.leadStatus.findUnique({ where: { organizationId_name: { organizationId, name: detail.name } } });
     if (!row) {
       const { stage, sortOrder } = classifyStatusName(detail.name);
-      row = await this.prisma.leadStatus.create({ data: { crmId: detail.id, name: detail.name, stage, sortOrder } });
+      row = await this.prisma.leadStatus.create({ data: { organizationId, crmId: detail.id, name: detail.name, stage, sortOrder } });
     }
     this.statusCache.set(detail.id, row.id);
     return row.id;
@@ -156,13 +168,14 @@ export class CrmSyncService {
   ): Promise<string> {
     if (cache.has(detail.id)) return cache.get(detail.id)!;
 
+    const organizationId = TenantContext.get().organizationId;
     const client = this.prisma[model] as unknown as {
       findUnique: (args: unknown) => Promise<{ id: string } | null>;
       create: (args: unknown) => Promise<{ id: string }>;
     };
-    let row = await client.findUnique({ where: { crmId: detail.id } });
-    if (!row) row = await client.findUnique({ where: { name: detail.name } });
-    if (!row) row = await client.create({ data: { crmId: detail.id, name: detail.name } });
+    let row = await client.findUnique({ where: { organizationId_crmId: { organizationId, crmId: detail.id } } });
+    if (!row) row = await client.findUnique({ where: { organizationId_name: { organizationId, name: detail.name } } });
+    if (!row) row = await client.create({ data: { organizationId, crmId: detail.id, name: detail.name } });
     cache.set(detail.id, row.id);
     return row.id;
   }
@@ -170,11 +183,12 @@ export class CrmSyncService {
   private async ensureRep(user: Parameters<typeof mapCrmRep>[0]): Promise<string> {
     if (this.repCache.has(user.id)) return this.repCache.get(user.id)!;
 
+    const organizationId = TenantContext.get().organizationId;
     const rep = mapCrmRep(user);
     const row = await this.prisma.salesExecutive.upsert({
-      where: { employeeCode: rep.employeeCode },
+      where: { organizationId_employeeCode: { organizationId, employeeCode: rep.employeeCode } },
       update: { name: rep.name, email: rep.email },
-      create: { employeeCode: rep.employeeCode, name: rep.name, email: rep.email, designation: "Sales Executive" },
+      create: { organizationId, employeeCode: rep.employeeCode, name: rep.name, email: rep.email, designation: "Sales Executive" },
     });
     this.repCache.set(user.id, row.id);
     return row.id;

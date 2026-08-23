@@ -34,25 +34,41 @@ export class AuthService {
     return value;
   }
 
+  // User.email is unique per-organization, not globally (two different tenants may have staff
+  // who happen to share an email) — so a login lookup by email alone can return more than one
+  // candidate row. Disambiguate by checking the password against each candidate rather than
+  // asking for a company/org selector on the login form.
   async validateCredentials(email: string, password: string): Promise<UserWithRoleAndExec> {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
+    const candidates = await this.prisma.user.findMany({
+      where: { email, isActive: true },
       include: { role: true, salesExecutive: true },
     });
-    if (!user || !user.isActive) {
+
+    const matches: UserWithRoleAndExec[] = [];
+    for (const candidate of candidates) {
+      if (await bcrypt.compare(password, candidate.passwordHash)) {
+        matches.push(candidate);
+      }
+    }
+
+    if (matches.length === 0) {
       throw new UnauthorizedException('Invalid email or password');
     }
-    const matches = await bcrypt.compare(password, user.passwordHash);
-    if (!matches) {
-      throw new UnauthorizedException('Invalid email or password');
+    if (matches.length > 1) {
+      // Two different tenants both have a user with this email AND this password — an
+      // intentionally rare edge case we don't resolve with an org-selector UI yet.
+      throw new UnauthorizedException(
+        'This email/password matches accounts in more than one organization. Please contact support.',
+      );
     }
-    return user;
+    return matches[0];
   }
 
   async issueTokens(user: UserWithRoleAndExec): Promise<{ tokens: AuthTokens; payload: JwtPayload }> {
     const permissionCodes = await this.permissions.getPermissionCodesForRole(user.roleId);
     const payload: JwtPayload = {
       sub: user.id,
+      organizationId: user.organizationId,
       email: user.email,
       roleId: user.roleId,
       roleName: user.role.name,

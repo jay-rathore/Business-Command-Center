@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { CompanyProfile, CompanyProfileOption } from "@hpl/shared";
 import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
+import { TenantContext } from "../common/context/tenant-context";
 import { UpsertCompanyProfileDto } from "./dto/upsert-company-profile.dto";
 
 @Injectable()
@@ -44,7 +45,7 @@ export class CompanyProfilesService {
       if (dto.isDefault) {
         await tx.companyProfile.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
       }
-      return tx.companyProfile.create({ data: dto });
+      return tx.companyProfile.create({ data: { ...dto, organizationId: TenantContext.get().organizationId } });
     });
     return this.toDto(row);
   }

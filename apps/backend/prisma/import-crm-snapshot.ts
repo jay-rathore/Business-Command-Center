@@ -19,6 +19,10 @@ import { CrmLeadRaw, CrmLookupRow, mapCrmLead, mapCrmRep } from '../src/leads/cr
 const prisma = new PrismaClient();
 const SNAPSHOT_DIR = path.join(__dirname, 'crm-snapshot');
 const CHUNK_SIZE = 2000;
+// Matches seed.ts's ORG_SLUG — this snapshot is HPL Maker's own CRM data, imported into
+// HPL Maker (tenant #1), so it deliberately hardcodes the same slug rather than importing
+// from seed.ts (which would re-run that script's own main()).
+const ORG_SLUG = 'hpl-maker';
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -60,7 +64,7 @@ function sourcesWithEmbeddedDetails(rows: CrmLookupRow[], leads: CrmLeadRaw[]): 
 
 /** Upserts deduped-by-name LeadStatus rows and returns a map from EVERY CRM status id
  * (including duplicate-named ones) to the single resulting row id. */
-async function seedStatuses(rows: CrmLookupRow[]): Promise<Map<number, string>> {
+async function seedStatuses(organizationId: string, rows: CrmLookupRow[]): Promise<Map<number, string>> {
   const eligible = rows.filter((r) => !CRM_STATUS_EXCLUDED_DEPARTMENTS.has(r.department_name ?? ''));
   const byName = new Map<string, CrmLookupRow[]>();
   for (const r of eligible) {
@@ -73,9 +77,9 @@ async function seedStatuses(rows: CrmLookupRow[]): Promise<Map<number, string>> 
     const { stage, sortOrder } = classifyStatusName(name);
     const primaryCrmId = variants[0].id;
     const row = await prisma.leadStatus.upsert({
-      where: { crmId: primaryCrmId },
+      where: { organizationId_crmId: { organizationId, crmId: primaryCrmId } },
       update: { name, stage, sortOrder },
-      create: { crmId: primaryCrmId, name, stage, sortOrder },
+      create: { organizationId, crmId: primaryCrmId, name, stage, sortOrder },
     });
     for (const variant of variants) crmIdToRowId.set(variant.id, row.id);
   }
@@ -83,6 +87,7 @@ async function seedStatuses(rows: CrmLookupRow[]): Promise<Map<number, string>> 
 }
 
 async function seedSimpleLookup(
+  organizationId: string,
   model: 'leadSource' | 'leadType',
   rows: CrmLookupRow[],
 ): Promise<Map<number, string>> {
@@ -96,9 +101,9 @@ async function seedSimpleLookup(
     const primaryCrmId = byName.get(r.name)!;
     if (!crmIdToRowId.has(primaryCrmId)) {
       const row = await (prisma[model] as any).upsert({
-        where: { crmId: primaryCrmId },
+        where: { organizationId_crmId: { organizationId, crmId: primaryCrmId } },
         update: { name: r.name },
-        create: { crmId: primaryCrmId, name: r.name },
+        create: { organizationId, crmId: primaryCrmId, name: r.name },
       });
       crmIdToRowId.set(primaryCrmId, row.id);
     }
@@ -107,7 +112,7 @@ async function seedSimpleLookup(
   return crmIdToRowId;
 }
 
-async function seedReps(leads: CrmLeadRaw[]): Promise<Map<number, string>> {
+async function seedReps(organizationId: string, leads: CrmLeadRaw[]): Promise<Map<number, string>> {
   const uniqueUsers = new Map<number, ReturnType<typeof mapCrmRep>>();
   for (const l of leads) {
     const user = l.assigned_to?.user;
@@ -117,9 +122,9 @@ async function seedReps(leads: CrmLeadRaw[]): Promise<Map<number, string>> {
   const crmUserIdToExecId = new Map<number, string>();
   for (const rep of uniqueUsers.values()) {
     const row = await prisma.salesExecutive.upsert({
-      where: { employeeCode: rep.employeeCode },
+      where: { organizationId_employeeCode: { organizationId, employeeCode: rep.employeeCode } },
       update: { name: rep.name, email: rep.email },
-      create: { employeeCode: rep.employeeCode, name: rep.name, email: rep.email, designation: 'Sales Executive' },
+      create: { organizationId, employeeCode: rep.employeeCode, name: rep.name, email: rep.email, designation: 'Sales Executive' },
     });
     crmUserIdToExecId.set(rep.crmUserId, row.id);
   }
@@ -127,24 +132,39 @@ async function seedReps(leads: CrmLeadRaw[]): Promise<Map<number, string>> {
 }
 
 async function main() {
+  // Upsert (not just look up) so this script can run before OR after seed.ts — running it
+  // first (recommended: real CRM data, then seed.ts sees leads already exist and skips its
+  // own demo lead/taxonomy generation, avoiding a LeadStatus/LeadSource/LeadType name
+  // collision between the demo taxonomy and the real CRM's) still works either way.
+  const organization = await prisma.organization.upsert({
+    where: { slug: ORG_SLUG },
+    update: {},
+    create: { slug: ORG_SLUG, name: 'HPL Maker' },
+  });
+  const organizationId = organization.id;
+
   console.log('Loading snapshot files...');
   const lookups = await loadLookups();
   const leads = JSON.parse(fs.readFileSync(path.join(SNAPSHOT_DIR, 'hpl_leads.json'), 'utf8')) as CrmLeadRaw[];
   console.log(`  ${leads.length} leads, ${lookups.status.length} statuses, ${lookups.source.length} sources, ${lookups.type.length} types`);
 
   console.log('Seeding lookup tables...');
-  const statusMap = await seedStatuses(withEmbeddedDetails(lookups.status, leads, 'status_detail'));
-  const sourceMap = await seedSimpleLookup('leadSource', sourcesWithEmbeddedDetails(lookups.source, leads));
-  const typeMap = await seedSimpleLookup('leadType', withEmbeddedDetails(lookups.type, leads, 'type_detail'));
+  const statusMap = await seedStatuses(organizationId, withEmbeddedDetails(lookups.status, leads, 'status_detail'));
+  const sourceMap = await seedSimpleLookup(organizationId, 'leadSource', sourcesWithEmbeddedDetails(lookups.source, leads));
+  const typeMap = await seedSimpleLookup(organizationId, 'leadType', withEmbeddedDetails(lookups.type, leads, 'type_detail'));
   console.log(`  ${new Set(statusMap.values()).size} statuses, ${new Set(sourceMap.values()).size} sources, ${new Set(typeMap.values()).size} types`);
 
   console.log('Seeding sales reps...');
-  const repMap = await seedReps(leads);
+  const repMap = await seedReps(organizationId, leads);
   console.log(`  ${repMap.size} sales reps`);
 
   // Small tables (~30 statuses, ~17 sources) — fetch once for score lookups during the batch loop below.
-  const statusScoreById = new Map((await prisma.leadStatus.findMany()).map((s) => [s.id, { score: s.score, stage: s.stage }]));
-  const sourceScoreById = new Map((await prisma.leadSource.findMany()).map((s) => [s.id, s.score]));
+  const statusScoreById = new Map(
+    (await prisma.leadStatus.findMany({ where: { organizationId } })).map((s) => [s.id, { score: s.score, stage: s.stage }]),
+  );
+  const sourceScoreById = new Map(
+    (await prisma.leadSource.findMany({ where: { organizationId } })).map((s) => [s.id, s.score]),
+  );
 
   console.log('Importing leads...');
   let createdLeads = 0;
@@ -172,6 +192,7 @@ async function main() {
       });
 
       return {
+        organizationId,
         crmId: mapped.crmId,
         leadCode: mapped.leadCode,
         name: mapped.name,
@@ -202,18 +223,21 @@ async function main() {
 
   console.log('Linking lead sources...');
   const idByCrmId = new Map<number, string>();
-  const importedLeads = await prisma.lead.findMany({ where: { crmId: { not: null } }, select: { id: true, crmId: true } });
+  const importedLeads = await prisma.lead.findMany({
+    where: { organizationId, crmId: { not: null } },
+    select: { id: true, crmId: true },
+  });
   for (const l of importedLeads) idByCrmId.set(l.crmId!, l.id);
 
   let sourceLinks = 0;
   for (const batch of chunk(leads, CHUNK_SIZE)) {
-    const joinRows: { leadId: string; leadSourceId: string }[] = [];
+    const joinRows: { organizationId: string; leadId: string; leadSourceId: string }[] = [];
     for (const raw of batch) {
       const leadId = idByCrmId.get(raw.id);
       if (!leadId) continue;
       for (const sourceCrmId of raw.source ?? []) {
         const leadSourceId = sourceMap.get(sourceCrmId);
-        if (leadSourceId) joinRows.push({ leadId, leadSourceId });
+        if (leadSourceId) joinRows.push({ organizationId, leadId, leadSourceId });
       }
     }
     if (joinRows.length === 0) continue;

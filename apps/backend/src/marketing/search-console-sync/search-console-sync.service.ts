@@ -1,10 +1,13 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { google } from "googleapis";
 import { SearchConsoleSummary } from "@hpl/shared";
+import { IntegrationProvider } from "@prisma/client";
 import { PRISMA_EXTENDED_CLIENT } from "../../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../../prisma/prisma-extended.provider";
+import { TenantContext } from "../../common/context/tenant-context";
+import { IntegrationConnectionsService } from "../../integration-connections/integration-connections.service";
+import type { SearchConsoleCredentials } from "../../integration-connections/credential-types";
 
 const REPORT_DAYS = 30;
 const FRESHNESS_LAG_DAYS = 3; // Search Console data typically isn't final until ~2-3 days after the fact
@@ -14,33 +17,43 @@ function toDateString(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Pulls site-wide daily totals + a top-queries snapshot from Search Console, upserting
+/** Pulls site-wide daily totals + a top-queries snapshot from each tenant's own Search Console
+ * property (credentials: IntegrationConnection, provider SEARCH_CONSOLE), upserting
  * SearchConsoleDaily (by date) and SearchConsoleTopQuery (by date+query) — mirrors
- * GoogleAnalyticsSyncService in shape. Shares the same service account credentials as GA4; the
- * account must be added as a user under the property's Settings → Users and permissions. */
+ * GoogleAnalyticsSyncService in shape. The configured service account must be added as a user
+ * on that site under Search Console's Settings → Users and permissions. */
 @Injectable()
 export class SearchConsoleSyncService {
   private readonly logger = new Logger(SearchConsoleSyncService.name);
-  private searchconsole: ReturnType<typeof google.searchconsole> | null = null;
 
   constructor(
     @Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient,
-    private readonly config: ConfigService,
+    private readonly connections: IntegrationConnectionsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async scheduledSync(): Promise<void> {
-    try {
-      const result = await this.syncNow();
-      this.logger.log(`Search Console sync: ${result.dailyRows} daily rows, ${result.topQueries} top queries`);
-    } catch (err) {
-      this.logError(err);
+    const active = await this.connections.listActive(IntegrationProvider.SEARCH_CONSOLE);
+    for (const connection of active) {
+      await TenantContext.run({ organizationId: connection.organizationId }, async () => {
+        try {
+          const credentials = this.connections.decrypt<SearchConsoleCredentials>(connection);
+          const result = await this.syncNow(credentials);
+          await this.connections.recordSuccess(connection.id);
+          this.logger.log(
+            `Search Console sync (org ${connection.organizationId}): ${result.dailyRows} daily rows, ${result.topQueries} top queries`,
+          );
+        } catch (err) {
+          await this.connections.recordError(connection.id, this.errorMessage(err));
+          this.logError(connection.organizationId, err);
+        }
+      });
     }
   }
 
-  async syncNow(): Promise<{ dailyRows: number; topQueries: number }> {
-    const client = this.getClient();
-    const siteUrl = this.config.getOrThrow<string>("SEARCH_CONSOLE_SITE_URL");
+  async syncNow(credentials: SearchConsoleCredentials): Promise<{ dailyRows: number; topQueries: number }> {
+    const client = this.getClient(credentials);
+    const siteUrl = credentials.siteUrl;
 
     const end = new Date();
     end.setDate(end.getDate() - FRESHNESS_LAG_DAYS);
@@ -58,13 +71,18 @@ export class SearchConsoleSyncService {
       }),
     ]);
 
+    const organizationId = TenantContext.get().organizationId;
     let dailyRows = 0;
     for (const row of dailyRes.data.rows ?? []) {
       const dateKey = row.keys?.[0];
       if (!dateKey) continue;
       const date = new Date(dateKey);
       const data = { clicks: Math.round(row.clicks ?? 0), impressions: Math.round(row.impressions ?? 0), ctr: row.ctr ?? 0, position: row.position ?? 0 };
-      await this.prisma.searchConsoleDaily.upsert({ where: { date }, update: data, create: { date, ...data } });
+      await this.prisma.searchConsoleDaily.upsert({
+        where: { organizationId_date: { organizationId, date } },
+        update: data,
+        create: { organizationId, date, ...data },
+      });
       dailyRows++;
     }
 
@@ -78,9 +96,9 @@ export class SearchConsoleSyncService {
       if (!query) continue;
       const data = { clicks: Math.round(row.clicks ?? 0), impressions: Math.round(row.impressions ?? 0), ctr: row.ctr ?? 0, position: row.position ?? 0 };
       await this.prisma.searchConsoleTopQuery.upsert({
-        where: { date_query: { date: end, query } },
+        where: { organizationId_date_query: { organizationId, date: end, query } },
         update: data,
-        create: { date: end, query, ...data },
+        create: { organizationId, date: end, query, ...data },
       });
     }
 
@@ -118,27 +136,30 @@ export class SearchConsoleSyncService {
     };
   }
 
-  private getClient() {
-    if (!this.searchconsole) {
-      const auth = new google.auth.JWT({
-        email: this.config.getOrThrow<string>("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
-        key: this.config.getOrThrow<string>("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY").replace(/\\n/g, "\n"),
-        scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
-      });
-      this.searchconsole = google.searchconsole({ version: "v1", auth });
-    }
-    return this.searchconsole;
+  // Deliberately not cached on the instance — this is a singleton provider shared across every
+  // tenant's requests, and each tenant now has its own service account credentials.
+  private getClient(credentials: SearchConsoleCredentials) {
+    const auth = new google.auth.JWT({
+      email: credentials.serviceAccountEmail,
+      key: credentials.serviceAccountPrivateKey.replace(/\\n/g, "\n"),
+      scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
+    });
+    return google.searchconsole({ version: "v1", auth });
   }
 
-  private logError(err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
+  private errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  private logError(organizationId: string, err: unknown): void {
+    const message = this.errorMessage(err);
     if (message.includes("403") || message.includes("PERMISSION_DENIED") || message.includes("not verified")) {
       this.logger.error(
-        `Search Console sync failed — check that the service account (GOOGLE_SERVICE_ACCOUNT_EMAIL) is added as a ` +
-          `user on ${this.config.get<string>("SEARCH_CONSOLE_SITE_URL")} under Settings → Users and permissions. Original error: ${message}`,
+        `Search Console sync failed (org ${organizationId}) — check that the configured service account is added ` +
+          `as a user on the site under Settings → Users and permissions. Original error: ${message}`,
       );
       return;
     }
-    this.logger.error(`Search Console sync failed: ${message}`);
+    this.logger.error(`Search Console sync failed (org ${organizationId}): ${message}`);
   }
 }

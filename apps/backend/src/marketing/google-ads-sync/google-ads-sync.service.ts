@@ -1,10 +1,12 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { GoogleAdsApi } from "google-ads-api";
-import { CampaignStatus } from "@prisma/client";
+import { CampaignStatus, IntegrationProvider } from "@prisma/client";
 import { PRISMA_EXTENDED_CLIENT } from "../../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../../prisma/prisma-extended.provider";
+import { TenantContext } from "../../common/context/tenant-context";
+import { IntegrationConnectionsService } from "../../integration-connections/integration-connections.service";
+import type { GoogleAdsCredentials } from "../../integration-connections/credential-types";
 
 const LIFETIME_FROM_DATE = "2015-01-01"; // arbitrary floor well before any real campaign, mirrors Meta's date_preset=maximum
 
@@ -25,33 +27,43 @@ function mapCampaignStatus(status: string): CampaignStatus {
   return "ENDED";
 }
 
-/** Pulls real campaign spend + conversion counts from the live Google Ads account, additively
- * upserting by googleCampaignId — mirrors MetaAdsSyncService (../meta-ads-sync/meta-ads-sync.service.ts).
+/** Pulls real campaign spend + conversion counts from each tenant's own live Google Ads
+ * account (credentials: IntegrationConnection, provider GOOGLE_ADS), additively upserting by
+ * googleCampaignId — mirrors MetaAdsSyncService (../meta-ads-sync/meta-ads-sync.service.ts).
  * Uses a wide fixed date range (lifetime-style totals) since `spend`/`leadsCount` are cumulative
  * cached columns, not a rolling window. revenue is intentionally never touched here — see the
  * "never fabricate revenue against real spend" note in marketing.service.ts. */
 @Injectable()
 export class GoogleAdsSyncService {
   private readonly logger = new Logger(GoogleAdsSyncService.name);
-  private client: GoogleAdsApi | null = null;
 
   constructor(
     @Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient,
-    private readonly config: ConfigService,
+    private readonly connections: IntegrationConnectionsService,
   ) {}
 
   @Cron(CronExpression.EVERY_6_HOURS)
   async scheduledSync(): Promise<void> {
-    try {
-      const result = await this.syncNow();
-      this.logger.log(`Google Ads sync: ${result.processed} campaigns processed (${result.created} new, ${result.updated} updated)`);
-    } catch (err) {
-      this.logError(err);
+    const active = await this.connections.listActive(IntegrationProvider.GOOGLE_ADS);
+    for (const connection of active) {
+      await TenantContext.run({ organizationId: connection.organizationId }, async () => {
+        try {
+          const credentials = this.connections.decrypt<GoogleAdsCredentials>(connection);
+          const result = await this.syncNow(credentials);
+          await this.connections.recordSuccess(connection.id);
+          this.logger.log(
+            `Google Ads sync (org ${connection.organizationId}): ${result.processed} campaigns processed (${result.created} new, ${result.updated} updated)`,
+          );
+        } catch (err) {
+          await this.connections.recordError(connection.id, this.errorMessage(err));
+          this.logError(connection.organizationId, err);
+        }
+      });
     }
   }
 
-  async syncNow(): Promise<GoogleAdsSyncResult> {
-    const customer = this.getCustomer();
+  async syncNow(credentials: GoogleAdsCredentials): Promise<GoogleAdsSyncResult> {
+    const customer = this.getCustomer(credentials);
     const toDate = new Date().toISOString().slice(0, 10);
 
     const rows = (await customer.report({
@@ -62,6 +74,7 @@ export class GoogleAdsSyncService {
       to_date: toDate,
     })) as unknown as GoogleCampaignRow[];
 
+    const organizationId = TenantContext.get().organizationId;
     let created = 0;
     let updated = 0;
 
@@ -70,10 +83,13 @@ export class GoogleAdsSyncService {
       const leadsCount = Math.round(Number(row.metrics.conversions ?? 0));
       const googleCampaignId = String(row.campaign.id);
 
-      const existing = await this.prisma.marketingCampaign.findUnique({ where: { googleCampaignId }, select: { id: true } });
+      const existing = await this.prisma.marketingCampaign.findUnique({
+        where: { organizationId_googleCampaignId: { organizationId, googleCampaignId } },
+        select: { id: true },
+      });
 
       await this.prisma.marketingCampaign.upsert({
-        where: { googleCampaignId },
+        where: { organizationId_googleCampaignId: { organizationId, googleCampaignId } },
         update: {
           name: row.campaign.name,
           status: mapCampaignStatus(row.campaign.status),
@@ -82,6 +98,7 @@ export class GoogleAdsSyncService {
           endDate: row.campaign.endDateTime ? new Date(row.campaign.endDateTime) : null,
         },
         create: {
+          organizationId,
           googleCampaignId,
           name: row.campaign.name,
           platform: "GOOGLE_ADS",
@@ -100,31 +117,34 @@ export class GoogleAdsSyncService {
     return { processed: rows.length, created, updated };
   }
 
-  private getCustomer() {
-    if (!this.client) {
-      this.client = new GoogleAdsApi({
-        client_id: this.config.getOrThrow<string>("GOOGLE_ADS_CLIENT_ID"),
-        client_secret: this.config.getOrThrow<string>("GOOGLE_ADS_CLIENT_SECRET"),
-        developer_token: this.config.getOrThrow<string>("GOOGLE_ADS_DEVELOPER_TOKEN"),
-      });
-    }
-
-    return this.client.Customer({
-      customer_id: this.config.getOrThrow<string>("GOOGLE_ADS_CUSTOMER_ID"),
-      login_customer_id: this.config.get<string>("GOOGLE_ADS_LOGIN_CUSTOMER_ID"),
-      refresh_token: this.config.getOrThrow<string>("GOOGLE_ADS_REFRESH_TOKEN"),
+  // Deliberately not cached on the instance — this is a singleton provider shared across every
+  // tenant's requests, and each tenant now has its own client_id/client_secret/developer_token.
+  private getCustomer(credentials: GoogleAdsCredentials) {
+    const client = new GoogleAdsApi({
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
+      developer_token: credentials.developerToken,
+    });
+    return client.Customer({
+      customer_id: credentials.customerId,
+      login_customer_id: credentials.loginCustomerId,
+      refresh_token: credentials.refreshToken,
     });
   }
 
-  private logError(err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
+  private errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  private logError(organizationId: string, err: unknown): void {
+    const message = this.errorMessage(err);
     if (message.includes("UNAUTHENTICATED") || message.includes("invalid_grant") || message.includes("PERMISSION_DENIED")) {
       this.logger.error(
-        `Google Ads sync failed — credentials likely invalid or expired. Re-check GOOGLE_ADS_REFRESH_TOKEN / ` +
-          `GOOGLE_ADS_DEVELOPER_TOKEN / GOOGLE_ADS_CUSTOMER_ID in .env. Original error: ${message}`,
+        `Google Ads sync failed (org ${organizationId}) — credentials likely invalid or expired. Re-check this ` +
+          `tenant's Google Ads connection in Settings. Original error: ${message}`,
       );
       return;
     }
-    this.logger.error(`Google Ads sync failed: ${message}`);
+    this.logger.error(`Google Ads sync failed (org ${organizationId}): ${message}`);
   }
 }

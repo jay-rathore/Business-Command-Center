@@ -1,9 +1,11 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { CampaignStatus } from "@prisma/client";
+import { CampaignStatus, IntegrationProvider } from "@prisma/client";
 import { PRISMA_EXTENDED_CLIENT } from "../../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../../prisma/prisma-extended.provider";
+import { TenantContext } from "../../common/context/tenant-context";
+import { IntegrationConnectionsService } from "../../integration-connections/integration-connections.service";
+import type { MetaAdsCredentials } from "../../integration-connections/credential-types";
 
 const GRAPH_API_VERSION = "v21.0";
 
@@ -38,38 +40,49 @@ function mapEffectiveStatus(status: string): CampaignStatus {
   return "ENDED";
 }
 
-/** Pulls real campaign spend + lead counts from HPL Maker's live Meta Ads account, additively
- * upserting by metaCampaignId — mirrors WcSyncService (../../products/wc-sync/wc-sync.service.ts).
- * Uses date_preset=maximum (lifetime totals) since `spend`/`leadsCount` are cumulative cached
- * columns, not a rolling window. revenue is intentionally never touched here — see the "never
- * fabricate revenue against real spend" note in marketing.service.ts. */
+/** Pulls real campaign spend + lead counts from each tenant's own live Meta Ads account
+ * (credentials: IntegrationConnection, provider META_ADS — see
+ * integration-connections.service.ts), additively upserting by metaCampaignId — mirrors
+ * WcSyncService (../../products/wc-sync/wc-sync.service.ts). Uses date_preset=maximum
+ * (lifetime totals) since `spend`/`leadsCount` are cumulative cached columns, not a rolling
+ * window. revenue is intentionally never touched here — see the "never fabricate revenue
+ * against real spend" note in marketing.service.ts. */
 @Injectable()
 export class MetaAdsSyncService {
   private readonly logger = new Logger(MetaAdsSyncService.name);
 
   constructor(
     @Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient,
-    private readonly config: ConfigService,
+    private readonly connections: IntegrationConnectionsService,
   ) {}
 
   @Cron(CronExpression.EVERY_6_HOURS)
   async scheduledSync(): Promise<void> {
-    try {
-      const result = await this.syncNow();
-      this.logger.log(`Meta Ads sync: ${result.processed} campaigns processed (${result.created} new, ${result.updated} updated)`);
-    } catch (err) {
-      this.logError(err);
+    const active = await this.connections.listActive(IntegrationProvider.META_ADS);
+    for (const connection of active) {
+      await TenantContext.run({ organizationId: connection.organizationId }, async () => {
+        try {
+          const credentials = this.connections.decrypt<MetaAdsCredentials>(connection);
+          const result = await this.syncNow(credentials);
+          await this.connections.recordSuccess(connection.id);
+          this.logger.log(
+            `Meta Ads sync (org ${connection.organizationId}): ${result.processed} campaigns processed (${result.created} new, ${result.updated} updated)`,
+          );
+        } catch (err) {
+          await this.connections.recordError(connection.id, this.errorMessage(err));
+          this.logError(connection.organizationId, err);
+        }
+      });
     }
   }
 
-  async syncNow(): Promise<MetaAdsSyncResult> {
-    const accountId = this.config.getOrThrow<string>("META_AD_ACCOUNT_ID");
-    const token = this.config.getOrThrow<string>("META_ACCESS_TOKEN");
-    const base = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}`;
+  async syncNow(credentials: MetaAdsCredentials): Promise<MetaAdsSyncResult> {
+    const { adAccountId, accessToken } = credentials;
+    const base = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${adAccountId}`;
 
     const [campaignsRes, insightsRes] = await Promise.all([
-      fetch(`${base}/campaigns?fields=name,effective_status,start_time,stop_time&access_token=${token}`),
-      fetch(`${base}/insights?fields=campaign_id,spend,actions&level=campaign&date_preset=maximum&access_token=${token}`),
+      fetch(`${base}/campaigns?fields=name,effective_status,start_time,stop_time&access_token=${accessToken}`),
+      fetch(`${base}/insights?fields=campaign_id,spend,actions&level=campaign&date_preset=maximum&access_token=${accessToken}`),
     ]);
 
     if (!campaignsRes.ok) throw new Error(`Meta campaigns API returned ${campaignsRes.status}: ${await campaignsRes.text()}`);
@@ -79,6 +92,7 @@ export class MetaAdsSyncService {
     const insights = ((await insightsRes.json()) as { data: MetaInsightRaw[] }).data;
     const insightsByCampaign = new Map(insights.map((i) => [i.campaign_id, i]));
 
+    const organizationId = TenantContext.get().organizationId;
     let created = 0;
     let updated = 0;
 
@@ -87,10 +101,13 @@ export class MetaAdsSyncService {
       const spend = Number(insight?.spend ?? 0);
       const leadsCount = Number(insight?.actions?.find((a) => a.action_type === "lead")?.value ?? 0);
 
-      const existing = await this.prisma.marketingCampaign.findUnique({ where: { metaCampaignId: raw.id }, select: { id: true } });
+      const existing = await this.prisma.marketingCampaign.findUnique({
+        where: { organizationId_metaCampaignId: { organizationId, metaCampaignId: raw.id } },
+        select: { id: true },
+      });
 
       await this.prisma.marketingCampaign.upsert({
-        where: { metaCampaignId: raw.id },
+        where: { organizationId_metaCampaignId: { organizationId, metaCampaignId: raw.id } },
         update: {
           name: raw.name,
           status: mapEffectiveStatus(raw.effective_status),
@@ -99,6 +116,7 @@ export class MetaAdsSyncService {
           endDate: raw.stop_time ? new Date(raw.stop_time) : null,
         },
         create: {
+          organizationId,
           metaCampaignId: raw.id,
           name: raw.name,
           platform: "META_ADS",
@@ -117,15 +135,20 @@ export class MetaAdsSyncService {
     return { processed: campaigns.length, created, updated };
   }
 
-  private logError(err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
+  private errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  private logError(organizationId: string, err: unknown): void {
+    const message = this.errorMessage(err);
     if (message.includes("OAuthException") || message.includes('"code":190') || message.includes(" 401")) {
       this.logger.error(
-        `Meta Ads sync failed — access token likely expired. Generate a new one via Graph API Explorer ` +
-          `+ Access Token Debugger ("Extend Access Token") and update META_ACCESS_TOKEN in .env. Original error: ${message}`,
+        `Meta Ads sync failed (org ${organizationId}) — access token likely expired. Generate a new one via ` +
+          `Graph API Explorer + Access Token Debugger ("Extend Access Token") and update this tenant's Meta Ads ` +
+          `connection in Settings. Original error: ${message}`,
       );
       return;
     }
-    this.logger.error(`Meta Ads sync failed: ${message}`);
+    this.logger.error(`Meta Ads sync failed (org ${organizationId}): ${message}`);
   }
 }

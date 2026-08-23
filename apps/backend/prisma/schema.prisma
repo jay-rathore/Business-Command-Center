@@ -4,6 +4,16 @@
 // is wired to working APIs/UI right now — the rest of this schema exists so later phases
 // don't require a reshape. Soft-delete (deletedAt) is on "directory" entities; append-only
 // logs (Activity/AuditLog/Notification/OrderItem/AIInsight) are never soft-deleted.
+//
+// Multi-tenant: every business-data model carries `organizationId`, auto-scoped on every
+// query by the org-scope Prisma extension (src/prisma/org-scope.extension.ts) — see that
+// file and src/common/context/tenant-context.ts for how the current request's tenant flows
+// in. Only Role/Permission/RolePermission (global system RBAC) are exempt — every other
+// model, including join tables like LeadSourceOnLead, carries its own organizationId rather
+// than relying on scoping transitively through a relation: a direct groupBy/aggregate against
+// a join table (e.g. LeadsService.getSourceBreakdown) has no relation filter to inherit from,
+// so an unscoped join table is a real cross-tenant leak, not just redundant data. HPL Maker is
+// tenant #1.
 
 generator client {
   provider = "prisma-client-js"
@@ -79,7 +89,8 @@ enum ActivityType {
 // LeadStatus/LeadSource/LeadType were fixed enums until the app connected to the real
 // HPL CRM, which has a much richer, staff-editable taxonomy (40/17/15 live values) that a
 // closed enum can't represent without silently losing data. They're now lookup tables
-// (below, near the Lead model) mirroring the CRM's own dynamic status/source/type rows.
+// (below, near the Lead model) mirroring the CRM's own dynamic status/source/type rows —
+// per-tenant, since a different client's CRM taxonomy won't match HPL's.
 
 enum LeadStage {
   OPEN
@@ -247,13 +258,80 @@ enum QuotationEmailStatus {
   FAILED
 }
 
+enum IntegrationProvider {
+  META_ADS
+  GOOGLE_ADS
+  GOOGLE_ANALYTICS
+  SEARCH_CONSOLE
+  WOOCOMMERCE
+  WHATSAPP
+  EMAIL_SMTP
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tenancy
+// ─────────────────────────────────────────────────────────────────────────
+
+// The tenant root. HPL Maker is the first row (slug "hpl-maker"); every business-data
+// model below points back here via organizationId. No plan/billing fields yet — add
+// when the product actually has paying tenants beyond HPL Maker.
+model Organization {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  isActive Boolean @default(true)
+
+  users                      User[]
+  salesExecutives            SalesExecutive[]
+  customers                  Customer[]
+  leads                      Lead[]
+  leadStatuses               LeadStatus[]
+  leadSources                LeadSource[]
+  leadTypes                  LeadType[]
+  leadActivities             LeadActivity[]
+  dealers                    Dealer[]
+  dealerActivities           DealerActivity[]
+  architects                 Architect[]
+  builders                   Builder[]
+  projects                   Project[]
+  projectActivities          ProjectActivity[]
+  productCategories          ProductCategory[]
+  productShades              ProductShade[]
+  products                   Product[]
+  orders                     Order[]
+  orderItems                 OrderItem[]
+  salesTargets               SalesTarget[]
+  marketingCampaigns         MarketingCampaign[]
+  websiteAnalyticsDaily      WebsiteAnalyticsDaily[]
+  searchConsoleDaily         SearchConsoleDaily[]
+  searchConsoleTopQueries    SearchConsoleTopQuery[]
+  marketingLeadAttributions  MarketingLeadAttribution[]
+  complaints                 Complaint[]
+  warrantyClaims             WarrantyClaim[]
+  notifications              Notification[]
+  auditLogs                  AuditLog[]
+  aiInsights                 AIInsight[]
+  companyProfiles            CompanyProfile[]
+  quotationCounter           QuotationCounter?
+  leadCounter                LeadCounter?
+  quotations                 Quotation[]
+  quotationItems             QuotationItem[]
+  leadSourceOnLeads          LeadSourceOnLead[]
+  integrationConnections     IntegrationConnection[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Auth / RBAC  (Phase 1)
 // ─────────────────────────────────────────────────────────────────────────
 
 model User {
   id               String          @id @default(cuid())
-  email            String          @unique
+  organizationId   String
+  organization     Organization    @relation(fields: [organizationId], references: [id])
+  email            String
   passwordHash     String
   name             String
   phone            String?
@@ -269,9 +347,13 @@ model User {
   updatedAt        DateTime        @updatedAt
   deletedAt        DateTime?
 
+  @@unique([organizationId, email])
   @@index([roleId])
+  @@index([organizationId])
 }
 
+// Roles/Permissions stay global system RBAC shared across all tenants — not org-scoped.
+// Revisit if tenants ever need custom roles.
 model Role {
   id          String           @id @default(cuid())
   name        RoleName         @unique
@@ -306,20 +388,22 @@ model RolePermission {
 // ─────────────────────────────────────────────────────────────────────────
 
 model SalesExecutive {
-  id           String           @id @default(cuid())
-  employeeCode String           @unique
-  userId       String?          @unique
-  user         User?            @relation(fields: [userId], references: [id])
-  name         String
-  email        String?
-  phone        String?
-  designation  String
-  state        String?
-  managerId    String?
-  manager      SalesExecutive?  @relation("ExecManager", fields: [managerId], references: [id])
-  reports      SalesExecutive[] @relation("ExecManager")
-  hireDate     DateTime?
-  status       EmployeeStatus   @default(ACTIVE)
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  employeeCode   String
+  userId         String?          @unique
+  user           User?            @relation(fields: [userId], references: [id])
+  name           String
+  email          String?
+  phone          String?
+  designation    String
+  state          String?
+  managerId      String?
+  manager        SalesExecutive?  @relation("ExecManager", fields: [managerId], references: [id])
+  reports        SalesExecutive[] @relation("ExecManager")
+  hireDate       DateTime?
+  status         EmployeeStatus   @default(ACTIVE)
 
   leads             Lead[]
   leadActivities    LeadActivity[]
@@ -336,11 +420,16 @@ model SalesExecutive {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@unique([organizationId, employeeCode])
+  @@index([organizationId])
 }
 
 model Customer {
   id                String       @id @default(cuid())
-  customerCode      String       @unique
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  customerCode      String
   name              String
   companyName       String?
   phone             String
@@ -364,7 +453,8 @@ model Customer {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@index([state, city])
+  @@unique([organizationId, customerCode])
+  @@index([organizationId, state, city])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -373,8 +463,10 @@ model Customer {
 
 model Lead {
   id                    String             @id @default(cuid())
-  crmId                 Int?               @unique // external HPL CRM lead id, for sync upserts
-  leadCode              String             @unique
+  organizationId        String
+  organization          Organization       @relation(fields: [organizationId], references: [id])
+  crmId                 Int? // external HPL CRM lead id, for sync upserts — unique per tenant
+  leadCode              String
   name                  String
   company               String?
   phone                 String
@@ -416,72 +508,97 @@ model Lead {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@index([statusId])
-  @@index([leadTypeId])
-  @@index([assignedExecId])
-  @@index([state, city])
+  @@unique([organizationId, leadCode])
+  @@unique([organizationId, crmId])
+  @@index([organizationId, statusId])
+  @@index([organizationId, leadTypeId])
+  @@index([organizationId, assignedExecId])
+  @@index([organizationId, state, city])
 }
 
 // Mirrors the CRM's own per-status row (name, stage, ordering) instead of a closed enum —
 // see the note near LeadStage above. `stage` classifies each real CRM status as an editable
 // OPEN/WON/LOST bucket (used by KPIs/funnel/scoring) without baking status names into code.
 model LeadStatus {
-  id        String    @id @default(cuid())
-  crmId     Int?      @unique
-  name      String    @unique
-  stage     LeadStage @default(OPEN)
-  score     Int       @default(5)
-  sortOrder Int       @default(0)
-  isActive  Boolean   @default(true)
-  leads     Lead[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  crmId          Int?
+  name           String
+  stage          LeadStage    @default(OPEN)
+  score          Int          @default(5)
+  sortOrder      Int          @default(0)
+  isActive       Boolean      @default(true)
+  leads          Lead[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, crmId])
 }
 
 model LeadSource {
-  id        String             @id @default(cuid())
-  crmId     Int?               @unique
-  name      String             @unique
-  score     Int                @default(10)
-  isActive  Boolean            @default(true)
-  leads     LeadSourceOnLead[]
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
+  id             String             @id @default(cuid())
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  crmId          Int?
+  name           String
+  score          Int                @default(10)
+  isActive       Boolean            @default(true)
+  leads          LeadSourceOnLead[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, crmId])
 }
 
 // A Lead can carry multiple sources at once (e.g. both "Facebook" and "Google Ads"),
 // same as the CRM — this join table replaces what used to be a single scalar column.
+// Carries its own organizationId (denormalized from Lead) rather than relying on relation
+// scoping — LeadsService.getSourceBreakdown groupBy()s this table directly, and a groupBy
+// has no relation filter to inherit from.
 model LeadSourceOnLead {
-  leadId       String
-  lead         Lead       @relation(fields: [leadId], references: [id])
-  leadSourceId String
-  leadSource   LeadSource @relation(fields: [leadSourceId], references: [id])
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  leadId         String
+  lead           Lead         @relation(fields: [leadId], references: [id])
+  leadSourceId   String
+  leadSource     LeadSource   @relation(fields: [leadSourceId], references: [id])
 
   @@id([leadId, leadSourceId])
+  @@index([organizationId])
 }
 
 model LeadType {
-  id        String   @id @default(cuid())
-  crmId     Int?     @unique
-  name      String   @unique
-  isActive  Boolean  @default(true)
-  leads     Lead[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  crmId          Int?
+  name           String
+  isActive       Boolean      @default(true)
+  leads          Lead[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, crmId])
 }
 
 model LeadActivity {
-  id            String          @id @default(cuid())
-  leadId        String
-  lead          Lead            @relation(fields: [leadId], references: [id])
-  type          ActivityType
-  note          String?
-  performedById String?
-  performedBy   SalesExecutive? @relation(fields: [performedById], references: [id])
-  occurredAt    DateTime        @default(now())
-  createdAt     DateTime        @default(now())
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  leadId         String
+  lead           Lead            @relation(fields: [leadId], references: [id])
+  type           ActivityType
+  note           String?
+  performedById  String?
+  performedBy    SalesExecutive? @relation(fields: [performedById], references: [id])
+  occurredAt     DateTime        @default(now())
+  createdAt      DateTime        @default(now())
 
-  @@index([leadId, occurredAt])
+  @@index([organizationId, leadId, occurredAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -490,7 +607,9 @@ model LeadActivity {
 
 model Dealer {
   id                   String          @id @default(cuid())
-  dealerCode           String          @unique
+  organizationId       String
+  organization         Organization    @relation(fields: [organizationId], references: [id])
+  dealerCode           String
   name                 String
   contactName          String?
   phone                String
@@ -517,25 +636,28 @@ model Dealer {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@index([status])
-  @@index([state, city])
+  @@unique([organizationId, dealerCode])
+  @@index([organizationId, status])
+  @@index([organizationId, state, city])
 }
 
 // NOTE: totalOrders / revenue / growth / lastOrder are NEVER stored columns —
 // always derived via Order aggregation in DealersService.
 
 model DealerActivity {
-  id            String          @id @default(cuid())
-  dealerId      String
-  dealer        Dealer          @relation(fields: [dealerId], references: [id])
-  type          ActivityType
-  note          String?
-  performedById String?
-  performedBy   SalesExecutive? @relation(fields: [performedById], references: [id])
-  occurredAt    DateTime        @default(now())
-  createdAt     DateTime        @default(now())
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  dealerId       String
+  dealer         Dealer          @relation(fields: [dealerId], references: [id])
+  type           ActivityType
+  note           String?
+  performedById  String?
+  performedBy    SalesExecutive? @relation(fields: [performedById], references: [id])
+  occurredAt     DateTime        @default(now())
+  createdAt      DateTime        @default(now())
 
-  @@index([dealerId, occurredAt])
+  @@index([organizationId, dealerId, occurredAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -543,7 +665,9 @@ model DealerActivity {
 // ─────────────────────────────────────────────────────────────────────────
 
 model Architect {
-  id             String    @id @default(cuid())
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
   name           String
   company        String?
   city           String
@@ -559,10 +683,14 @@ model Architect {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@index([organizationId])
 }
 
 model Builder {
-  id             String    @id @default(cuid())
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
   name           String
   company        String?
   city           String
@@ -578,6 +706,8 @@ model Builder {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@index([organizationId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -586,7 +716,9 @@ model Builder {
 
 model Project {
   id              String          @id @default(cuid())
-  projectCode     String          @unique
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id])
+  projectCode     String
   name            String
   customerId      String?
   customer        Customer?       @relation(fields: [customerId], references: [id])
@@ -619,9 +751,10 @@ model Project {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@index([stage])
-  @@index([state, city])
-  @@index([salesExecId])
+  @@unique([organizationId, projectCode])
+  @@index([organizationId, stage])
+  @@index([organizationId, state, city])
+  @@index([organizationId, salesExecId])
 }
 
 // weighted pipeline value = estimatedValue * probability/100 — computed, not stored.
@@ -629,19 +762,21 @@ model Project {
 // links an order back to the project it converted from.
 
 model ProjectActivity {
-  id            String          @id @default(cuid())
-  projectId     String
-  project       Project         @relation(fields: [projectId], references: [id])
-  type          ActivityType
-  fromStage     ProjectStage?
-  toStage       ProjectStage?
-  note          String?
-  performedById String?
-  performedBy   SalesExecutive? @relation(fields: [performedById], references: [id])
-  occurredAt    DateTime        @default(now())
-  createdAt     DateTime        @default(now())
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  projectId      String
+  project        Project         @relation(fields: [projectId], references: [id])
+  type           ActivityType
+  fromStage      ProjectStage?
+  toStage        ProjectStage?
+  note           String?
+  performedById  String?
+  performedBy    SalesExecutive? @relation(fields: [performedById], references: [id])
+  occurredAt     DateTime        @default(now())
+  createdAt      DateTime        @default(now())
 
-  @@index([projectId, occurredAt])
+  @@index([organizationId, projectId, occurredAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -649,39 +784,49 @@ model ProjectActivity {
 // ─────────────────────────────────────────────────────────────────────────
 
 model ProductCategory {
-  id       String        @id @default(cuid())
-  name     String        @unique // Interior HPL / Exterior Cladding / Compact Laminate / Bathroom Cubicle — doubles as "HPL type"
-  products Product[]
-  targets  SalesTarget[]
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String // Interior HPL / Exterior Cladding / Compact Laminate / Bathroom Cubicle — doubles as "HPL type"
+  products       Product[]
+  targets        SalesTarget[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@unique([organizationId, name])
 }
 
 model ProductShade {
-  id         String    @id @default(cuid())
-  name       String    @unique // Walnut Brown, Ivory Matte, Onyx Black Marble...
-  hexPreview String?
-  products   Product[]
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String // Walnut Brown, Ivory Matte, Onyx Black Marble...
+  hexPreview     String?
+  products       Product[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@unique([organizationId, name])
 }
 
 model Product {
-  id         String          @id @default(cuid())
-  sku        String          @unique
-  name       String
-  wcId       Int?            @unique // WooCommerce product id (hplmaker.com) — set only for products.wc-sync-synced rows
-  categoryId String
-  category   ProductCategory @relation(fields: [categoryId], references: [id])
-  shadeId    String?
-  shade      ProductShade?   @relation(fields: [shadeId], references: [id])
-  design     String? // "Woodgrain", "Marble", "Solid", "Stone"
-  unitPrice  Decimal         @db.Decimal(10, 2)
-  isActive   Boolean         @default(true)
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  sku            String
+  name           String
+  wcId           Int? // WooCommerce product id (hplmaker.com) — set only for products.wc-sync-synced rows
+  categoryId     String
+  category       ProductCategory @relation(fields: [categoryId], references: [id])
+  shadeId        String?
+  shade          ProductShade?   @relation(fields: [shadeId], references: [id])
+  design         String? // "Woodgrain", "Marble", "Solid", "Stone"
+  unitPrice      Decimal         @db.Decimal(10, 2)
+  isActive       Boolean         @default(true)
 
   orderItems     OrderItem[]
   complaints     Complaint[]
@@ -692,8 +837,10 @@ model Product {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@index([categoryId])
-  @@index([shadeId])
+  @@unique([organizationId, sku])
+  @@unique([organizationId, wcId])
+  @@index([organizationId, categoryId])
+  @@index([organizationId, shadeId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -703,7 +850,9 @@ model Product {
 
 model Order {
   id             String          @id @default(cuid())
-  orderCode      String          @unique
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  orderCode      String
   customerId     String?
   customer       Customer?       @relation(fields: [customerId], references: [id])
   dealerId       String?
@@ -729,26 +878,29 @@ model Order {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@index([orderDate])
-  @@index([dealerId])
-  @@index([customerId])
-  @@index([salesExecId])
-  @@index([state])
+  @@unique([organizationId, orderCode])
+  @@index([organizationId, orderDate])
+  @@index([organizationId, dealerId])
+  @@index([organizationId, customerId])
+  @@index([organizationId, salesExecId])
+  @@index([organizationId, state])
 }
 
 model OrderItem {
-  id        String   @id @default(cuid())
-  orderId   String
-  order     Order    @relation(fields: [orderId], references: [id])
-  productId String
-  product   Product  @relation(fields: [productId], references: [id])
-  quantity  Int
-  unitPrice Decimal  @db.Decimal(10, 2)
-  lineTotal Decimal  @db.Decimal(14, 2)
-  createdAt DateTime @default(now())
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  orderId        String
+  order          Order        @relation(fields: [orderId], references: [id])
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id])
+  quantity       Int
+  unitPrice      Decimal      @db.Decimal(10, 2)
+  lineTotal      Decimal      @db.Decimal(14, 2)
+  createdAt      DateTime     @default(now())
 
-  @@index([orderId])
-  @@index([productId])
+  @@index([organizationId, orderId])
+  @@index([organizationId, productId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -757,6 +909,8 @@ model OrderItem {
 
 model SalesTarget {
   id                String           @id @default(cuid())
+  organizationId    String
+  organization      Organization     @relation(fields: [organizationId], references: [id])
   scope             SalesTargetScope
   salesExecutiveId  String?
   salesExecutive    SalesExecutive?  @relation(fields: [salesExecutiveId], references: [id])
@@ -774,7 +928,7 @@ model SalesTarget {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@index([scope, periodStart, periodEnd])
+  @@index([organizationId, scope, periodStart, periodEnd])
 }
 
 // achievedRevenue is NEVER stored — always computed live from Order for the same period+scope.
@@ -786,18 +940,20 @@ model SalesTarget {
 // ─────────────────────────────────────────────────────────────────────────
 
 model MarketingCampaign {
-  id            String           @id @default(cuid())
-  name          String
-  platform      CampaignPlatform
-  status        CampaignStatus   @default(ACTIVE)
-  spend         Decimal          @db.Decimal(12, 2)
-  metaCampaignId String?         @unique // Meta Graph API campaign id — set only for real META_ADS-synced rows
-  googleCampaignId String?       @unique // Google Ads campaign id — set only for real GOOGLE_ADS-synced rows, see google-ads-sync.service.ts
-  leadsCount    Int              @default(0) // real (Meta "lead" action / Google Ads conversions) for synced rows, fabricated for seeded ones
-  revenue       Decimal          @default(0) @db.Decimal(12, 2) // fabricated-only — never set against real ad spend, see meta-ads-sync.service.ts
-  startDate     DateTime
-  endDate       DateTime?
-  notes         String?
+  id               String           @id @default(cuid())
+  organizationId   String
+  organization     Organization     @relation(fields: [organizationId], references: [id])
+  name             String
+  platform         CampaignPlatform
+  status           CampaignStatus   @default(ACTIVE)
+  spend            Decimal          @db.Decimal(12, 2)
+  metaCampaignId   String? // Meta Graph API campaign id — set only for real META_ADS-synced rows
+  googleCampaignId String? // Google Ads campaign id — set only for real GOOGLE_ADS-synced rows, see google-ads-sync.service.ts
+  leadsCount       Int              @default(0) // real (Meta "lead" action / Google Ads conversions) for synced rows, fabricated for seeded ones
+  revenue          Decimal          @default(0) @db.Decimal(12, 2) // fabricated-only — never set against real ad spend, see meta-ads-sync.service.ts
+  startDate        DateTime
+  endDate          DateTime?
+  notes            String?
 
   leads        Lead[]
   attributions MarketingLeadAttribution[]
@@ -805,57 +961,74 @@ model MarketingCampaign {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@unique([organizationId, metaCampaignId])
+  @@unique([organizationId, googleCampaignId])
 }
 
 model WebsiteAnalyticsDaily {
-  id                String   @id @default(cuid())
-  date              DateTime @unique @db.Date
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  date              DateTime     @db.Date
   sessions          Int
   activeUsers       Int
   newUsers          Int
   pageViews         Int
   conversions       Int
-  engagementRate    Decimal  @db.Decimal(5, 4)
-  avgSessionSeconds Decimal  @db.Decimal(10, 2)
+  engagementRate    Decimal      @db.Decimal(5, 4)
+  avgSessionSeconds Decimal      @db.Decimal(10, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, date])
 }
 
 model SearchConsoleDaily {
-  id          String   @id @default(cuid())
-  date        DateTime @unique @db.Date
-  clicks      Int
-  impressions Int
-  ctr         Decimal  @db.Decimal(6, 5)
-  position    Decimal  @db.Decimal(6, 2)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  date           DateTime     @db.Date
+  clicks         Int
+  impressions    Int
+  ctr            Decimal      @db.Decimal(6, 5)
+  position       Decimal      @db.Decimal(6, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, date])
 }
 
 model SearchConsoleTopQuery {
-  id          String   @id @default(cuid())
-  date        DateTime @db.Date
-  query       String
-  clicks      Int
-  impressions Int
-  ctr         Decimal  @db.Decimal(6, 5)
-  position    Decimal  @db.Decimal(6, 2)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  date           DateTime     @db.Date
+  query          String
+  clicks         Int
+  impressions    Int
+  ctr            Decimal      @db.Decimal(6, 5)
+  position       Decimal      @db.Decimal(6, 2)
 
   createdAt DateTime @default(now())
 
-  @@unique([date, query])
+  @@unique([organizationId, date, query])
 }
 
 model MarketingLeadAttribution {
-  id         String            @id @default(cuid())
-  leadId     String
-  lead       Lead              @relation(fields: [leadId], references: [id])
-  campaignId String
-  campaign   MarketingCampaign @relation(fields: [campaignId], references: [id])
-  touchType  TouchType
-  occurredAt DateTime          @default(now())
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  leadId         String
+  lead           Lead              @relation(fields: [leadId], references: [id])
+  campaignId     String
+  campaign       MarketingCampaign @relation(fields: [campaignId], references: [id])
+  touchType      TouchType
+  occurredAt     DateTime          @default(now())
+
+  @@index([organizationId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -863,30 +1036,36 @@ model MarketingLeadAttribution {
 // ─────────────────────────────────────────────────────────────────────────
 
 model Complaint {
-  id            String          @id @default(cuid())
-  complaintCode String          @unique
-  customerId    String
-  customer      Customer        @relation(fields: [customerId], references: [id])
-  productId     String?
-  product       Product?        @relation(fields: [productId], references: [id])
-  dealerId      String?
-  dealer        Dealer?         @relation(fields: [dealerId], references: [id])
-  issue         String
-  priority      Priority
-  status        ComplaintStatus @default(OPEN)
-  assignedToId  String?
-  assignedTo    SalesExecutive? @relation(fields: [assignedToId], references: [id])
-  dueAt         DateTime?
-  resolvedAt    DateTime?
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  complaintCode  String
+  customerId     String
+  customer       Customer        @relation(fields: [customerId], references: [id])
+  productId      String?
+  product        Product?        @relation(fields: [productId], references: [id])
+  dealerId       String?
+  dealer         Dealer?         @relation(fields: [dealerId], references: [id])
+  issue          String
+  priority       Priority
+  status         ComplaintStatus @default(OPEN)
+  assignedToId   String?
+  assignedTo     SalesExecutive? @relation(fields: [assignedToId], references: [id])
+  dueAt          DateTime?
+  resolvedAt     DateTime?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@unique([organizationId, complaintCode])
 }
 
 model WarrantyClaim {
   id              String              @id @default(cuid())
-  claimCode       String              @unique
+  organizationId  String
+  organization    Organization        @relation(fields: [organizationId], references: [id])
+  claimCode       String
   customerId      String
   customer        Customer            @relation(fields: [customerId], references: [id])
   productId       String
@@ -907,6 +1086,8 @@ model WarrantyClaim {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@unique([organizationId, claimCode])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -915,42 +1096,48 @@ model WarrantyClaim {
 // ─────────────────────────────────────────────────────────────────────────
 
 model Notification {
-  id           String            @id @default(cuid())
-  userId       String?
-  user         User?             @relation(fields: [userId], references: [id])
-  targetRole   RoleName? // broadcast to a role when userId is null
-  type         NotificationType
-  priority     Priority
-  title        String
-  message      String
-  linkModule   PermissionModule?
-  linkRecordId String?
-  isRead       Boolean           @default(false)
-  readAt       DateTime?
-  createdAt    DateTime          @default(now())
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?             @relation(fields: [userId], references: [id])
+  targetRole     RoleName? // broadcast to a role when userId is null
+  type           NotificationType
+  priority       Priority
+  title          String
+  message        String
+  linkModule     PermissionModule?
+  linkRecordId   String?
+  isRead         Boolean           @default(false)
+  readAt         DateTime?
+  createdAt      DateTime          @default(now())
 
-  @@index([userId, isRead])
+  @@index([organizationId, userId, isRead])
 }
 
 model AuditLog {
-  id          String           @id @default(cuid())
-  userId      String?
-  user        User?            @relation(fields: [userId], references: [id])
-  action      AuditAction
-  module      PermissionModule
-  recordId    String?
-  beforeValue Json?
-  afterValue  Json?
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime         @default(now())
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  userId         String?
+  user           User?            @relation(fields: [userId], references: [id])
+  action         AuditAction
+  module         PermissionModule
+  recordId       String?
+  beforeValue    Json?
+  afterValue     Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime         @default(now())
 
-  @@index([module, recordId])
-  @@index([userId, createdAt])
+  @@index([organizationId, module, recordId])
+  @@index([organizationId, userId, createdAt])
 }
 
 model AIInsight {
   id                String            @id @default(cuid())
+  organizationId    String
+  organization      Organization      @relation(fields: [organizationId], references: [id])
   category          InsightCategory
   type              InsightType
   priority          Priority
@@ -966,6 +1153,8 @@ model AIInsight {
   generatedAt       DateTime          @default(now())
   reviewedAt        DateTime?
   createdAt         DateTime          @default(now())
+
+  @@index([organizationId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -976,10 +1165,12 @@ model AIInsight {
 // the operator picks one per quotation (e.g. different branches/entities). The PDF's visual
 // layout is always the same fixed template (quotation.hbs); only this data block varies.
 model CompanyProfile {
-  id                           String  @id @default(cuid())
+  id                           String       @id @default(cuid())
+  organizationId               String
+  organization                 Organization @relation(fields: [organizationId], references: [id])
   label                        String // e.g. "Default", "Shreenath Global - Mumbai Branch"
-  isDefault                    Boolean @default(false)
-  isActive                     Boolean @default(true)
+  isDefault                    Boolean      @default(false)
+  isActive                     Boolean      @default(true)
   name                         String
   addressLine1                 String
   addressLine2                 String?
@@ -994,34 +1185,42 @@ model CompanyProfile {
   bankIfsc                     String
   bankSwift                    String?
   defaultTermsAndConditions    String // newline-separated, editable per-quotation after prefill
-  defaultAdvancePercent        Int     @default(50)
-  defaultBeforeDispatchPercent Int     @default(50)
-  validityDays                 Int     @default(30)
+  defaultAdvancePercent        Int          @default(50)
+  defaultBeforeDispatchPercent Int          @default(50)
+  validityDays                 Int          @default(30)
 
   quotations Quotation[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@index([organizationId])
 }
 
-// One fixed global counter row, incremented transactionally by QuotationNumberingService
-// to generate race-free sequential reference numbers (PI-2026-0001, ...).
+// One counter row per tenant (organizationId IS the primary key), incremented
+// transactionally by QuotationNumberingService to generate race-free sequential
+// reference numbers (PI-2026-0001, ...) scoped to that tenant.
 model QuotationCounter {
-  id  String @id @default("global")
-  seq Int    @default(0)
+  organizationId String       @id
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  seq            Int          @default(0)
 }
 
-// Race-free sequence for CARD-<year>-<seq> codes issued to leads created via business-card
-// scanning — the first manual (non-CRM-sync) lead-creation path. Mirrors QuotationCounter.
+// Race-free per-tenant sequence for CARD-<year>-<seq> codes issued to leads created via
+// business-card scanning — the first manual (non-CRM-sync) lead-creation path. Mirrors
+// QuotationCounter.
 model LeadCounter {
-  id  String @id @default("global")
-  seq Int    @default(0)
+  organizationId String       @id
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  seq            Int          @default(0)
 }
 
 model Quotation {
   id               String         @id @default(cuid())
-  quotationCode    String         @unique
+  organizationId   String
+  organization     Organization   @relation(fields: [organizationId], references: [id])
+  quotationCode    String
   leadId           String
   lead             Lead           @relation(fields: [leadId], references: [id])
   companyProfileId String
@@ -1073,24 +1272,52 @@ model Quotation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([leadId])
+  @@unique([organizationId, quotationCode])
+  @@index([organizationId, leadId])
 }
 
 model QuotationItem {
-  id          String    @id @default(cuid())
-  quotationId String
-  quotation   Quotation @relation(fields: [quotationId], references: [id])
-  srNo        Int
-  productId   String?
-  product     Product?  @relation(fields: [productId], references: [id])
-  itemName    String
-  hsnCode     String?
-  quantity    Int
-  unitRate    Decimal   @db.Decimal(10, 2)
-  taxPercent  Decimal   @default(18) @db.Decimal(5, 2)
-  lineAmount  Decimal   @db.Decimal(14, 2)
-  lineTax     Decimal   @db.Decimal(14, 2)
-  lineTotal   Decimal   @db.Decimal(14, 2)
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  quotationId    String
+  quotation      Quotation    @relation(fields: [quotationId], references: [id])
+  srNo           Int
+  productId      String?
+  product        Product?     @relation(fields: [productId], references: [id])
+  itemName       String
+  hsnCode        String?
+  quantity       Int
+  unitRate       Decimal      @db.Decimal(10, 2)
+  taxPercent     Decimal      @default(18) @db.Decimal(5, 2)
+  lineAmount     Decimal      @db.Decimal(14, 2)
+  lineTax        Decimal      @db.Decimal(14, 2)
+  lineTotal      Decimal      @db.Decimal(14, 2)
 
-  @@index([quotationId])
+  @@index([organizationId, quotationId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Integration connections — per-tenant third-party credentials (Meta/Google Ads/GA4/Search
+// Console/WooCommerce/WhatsApp/Email). Replaces the old single global .env credential set now
+// that a second tenant needs its own. `credentials` is an encrypted JSON blob (see
+// src/common/crypto/integration-credentials.ts) whose shape depends on `provider` — never
+// decrypted or returned by the API, only used server-side by the sync services.
+// ─────────────────────────────────────────────────────────────────────────
+
+model IntegrationConnection {
+  id             String              @id @default(cuid())
+  organizationId String
+  organization   Organization        @relation(fields: [organizationId], references: [id])
+  provider       IntegrationProvider
+  credentials    String // encrypted JSON blob
+  isActive       Boolean             @default(true)
+  lastSyncedAt   DateTime?
+  lastSyncError  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, provider])
+  @@index([provider, isActive])
 }

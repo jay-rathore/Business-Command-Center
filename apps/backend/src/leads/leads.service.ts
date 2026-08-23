@@ -15,6 +15,7 @@ import {
 } from "@hpl/shared";
 import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
+import { TenantContext } from "../common/context/tenant-context";
 import { buildPaginatedResponse } from "../common/utils/paginate";
 import { startOfMonth } from "../common/utils/date";
 import { LeadsListQueryDto } from "./dto/leads-list-query.dto";
@@ -188,7 +189,7 @@ export class LeadsService {
 
     const now = new Date();
     await this.prisma.leadActivity.create({
-      data: { leadId, type: dto.type, note: dto.note },
+      data: { organizationId: TenantContext.get().organizationId, leadId, type: dto.type, note: dto.note },
     });
 
     const statusUpdate: Prisma.LeadUpdateInput = { lastActivityAt: now };
@@ -241,14 +242,16 @@ export class LeadsService {
 
   async createFromBusinessCard(dto: CreateLeadFromCardDto): Promise<LeadDetail> {
     const leadCode = await this.coding.next();
+    const organizationId = TenantContext.get().organizationId;
     const source = await this.prisma.leadSource.upsert({
-      where: { name: BUSINESS_CARD_SOURCE_NAME },
+      where: { organizationId_name: { organizationId, name: BUSINESS_CARD_SOURCE_NAME } },
       update: {},
-      create: { name: BUSINESS_CARD_SOURCE_NAME, score: 8 },
+      create: { organizationId, name: BUSINESS_CARD_SOURCE_NAME, score: 8 },
     });
 
     const lead = await this.prisma.lead.create({
       data: {
+        organizationId,
         leadCode,
         name: dto.name,
         company: dto.company ?? null,
@@ -265,7 +268,7 @@ export class LeadsService {
         lastActivityAt: new Date(),
       },
     });
-    await this.prisma.leadSourceOnLead.create({ data: { leadId: lead.id, leadSourceId: source.id } });
+    await this.prisma.leadSourceOnLead.create({ data: { organizationId, leadId: lead.id, leadSourceId: source.id } });
 
     if (dto.saveImage && dto.imageDataUrl) {
       const path = this.cardImages.save(lead.id, dto.imageDataUrl);

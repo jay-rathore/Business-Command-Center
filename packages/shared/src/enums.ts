@@ -274,6 +274,17 @@ export const QuotationEmailStatus = {
 } as const;
 export type QuotationEmailStatus = (typeof QuotationEmailStatus)[keyof typeof QuotationEmailStatus];
 
+export const IntegrationProvider = {
+  META_ADS: 'META_ADS',
+  GOOGLE_ADS: 'GOOGLE_ADS',
+  GOOGLE_ANALYTICS: 'GOOGLE_ANALYTICS',
+  SEARCH_CONSOLE: 'SEARCH_CONSOLE',
+  WOOCOMMERCE: 'WOOCOMMERCE',
+  WHATSAPP: 'WHATSAPP',
+  EMAIL_SMTP: 'EMAIL_SMTP',
+} as const;
+export type IntegrationProvider = (typeof IntegrationProvider)[keyof typeof IntegrationProvider];
+
 // Sidebar nav — all 18 modules, in the spec's order. `phase` marks when each becomes functional.
 export interface NavModule {
   key: string;

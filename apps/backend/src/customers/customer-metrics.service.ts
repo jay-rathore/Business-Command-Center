@@ -3,6 +3,7 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { OrderStatus } from "@prisma/client";
 import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
+import { TenantContext, resolveDefaultOrganizationId } from "../common/context/tenant-context";
 
 /** Keeps Customer.lifetimeValue / firstPurchaseAt / lastPurchaseAt in sync with their Orders.
  * Mirrors DealerScoringService's bootstrap+cron caching pattern, but with no scoring/weights —
@@ -14,12 +15,16 @@ export class CustomerMetricsService implements OnApplicationBootstrap {
   constructor(@Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient) {}
 
   async onApplicationBootstrap() {
-    await this.recomputeAll();
+    // Runs outside any HTTP request, so there's no JWT-derived organizationId to read —
+    // resolve the single tenant that exists today instead. See resolveDefaultOrganizationId.
+    const organizationId = await resolveDefaultOrganizationId(this.prisma);
+    await TenantContext.run({ organizationId }, () => this.recomputeAll());
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
   async recomputeAllCron() {
-    await this.recomputeAll();
+    const organizationId = await resolveDefaultOrganizationId(this.prisma);
+    await TenantContext.run({ organizationId }, () => this.recomputeAll());
   }
 
   async recomputeAll(): Promise<number> {

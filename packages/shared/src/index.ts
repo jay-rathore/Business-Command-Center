@@ -9,3 +9,4 @@ export * from './types/leads';
 export * from './types/projects';
 export * from './types/dashboard';
 export * from './types/quotations';
+export * from './types/integrations';
