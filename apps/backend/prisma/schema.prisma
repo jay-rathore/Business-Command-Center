@@ -306,6 +306,10 @@ model Organization {
   searchConsoleDaily         SearchConsoleDaily[]
   searchConsoleTopQueries    SearchConsoleTopQuery[]
   marketingLeadAttributions  MarketingLeadAttribution[]
+  campaignEvents             CampaignEvent[]
+  adPlatformDailyMetrics     AdPlatformDailyMetric[]
+  websiteChannelDaily        WebsiteChannelDaily[]
+  websiteLandingPageDaily    WebsiteLandingPageDaily[]
   complaints                 Complaint[]
   warrantyClaims             WarrantyClaim[]
   notifications              Notification[]
@@ -962,8 +966,10 @@ model MarketingCampaign {
   endDate          DateTime?
   notes            String?
 
-  leads        Lead[]
-  attributions MarketingLeadAttribution[]
+  leads         Lead[]
+  attributions  MarketingLeadAttribution[]
+  events        CampaignEvent[]
+  dailyMetrics  AdPlatformDailyMetric[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1036,6 +1042,90 @@ model MarketingLeadAttribution {
   occurredAt     DateTime          @default(now())
 
   @@index([organizationId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Traffic Intelligence  (Marketing → Website & Search root-cause analysis)
+// ─────────────────────────────────────────────────────────────────────────
+
+// Field-level change history for MarketingCampaign, since campaign syncs upsert status/budget/name
+// in place with no history of their own. Written by CampaignEventService when a sync detects a
+// diff against the previously stored row — see meta-ads-sync.service.ts / google-ads-sync.service.ts.
+// detectedAt is the sync timestamp, not necessarily the exact moment the change happened on the
+// ad platform — resolution is bounded by sync cadence (~6h for Meta, ~24h for Google Ads).
+model CampaignEvent {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  campaignId     String
+  campaign       MarketingCampaign @relation(fields: [campaignId], references: [id])
+  field          String // "status" | "dailyBudget" | "name"
+  oldValue       String?
+  newValue       String?
+  detectedAt     DateTime          @default(now())
+
+  @@index([organizationId, detectedAt])
+  @@index([campaignId, detectedAt])
+}
+
+// Daily (not lifetime-cumulative) per-campaign ad performance, pulled alongside the existing
+// lifetime aggregate on MarketingCampaign — see the "time_increment=1" / "segments.date" note in
+// meta-ads-sync.service.ts / google-ads-sync.service.ts. This is what makes day-level "campaign X
+// generated N visitors on date Y" evidence possible; MarketingCampaign's own spend/impressions/
+// clicks fields stay lifetime-cumulative and untouched by this table.
+model AdPlatformDailyMetric {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  campaignId     String
+  campaign       MarketingCampaign @relation(fields: [campaignId], references: [id])
+  platform       CampaignPlatform
+  date           DateTime          @db.Date
+  spend          Decimal           @db.Decimal(12, 2)
+  impressions    Int
+  clicks         Int
+  conversions    Int
+  ctr            Decimal           @db.Decimal(7, 4)
+  avgCpc         Decimal           @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, campaignId, date])
+  @@index([organizationId, date])
+}
+
+// GA4 sessions broken down by sessionDefaultChannelGroup per day — WebsiteAnalyticsDaily only
+// carries site-wide totals, so this is what lets the root-cause engine say "Organic +18%,
+// Paid Social -42%" instead of just a single blended traffic number.
+model WebsiteChannelDaily {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  date           DateTime     @db.Date
+  channel        String // GA4 sessionDefaultChannelGroup, e.g. "Organic Search", "Paid Social", "Direct", "Referral"
+  sessions       Int
+  conversions    Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, date, channel])
+}
+
+// GA4 sessions broken down by landing page per day — mirrors SearchConsoleTopQuery's shape.
+// Enables "landing page X received 2.4x more traffic" style evidence.
+model WebsiteLandingPageDaily {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  date           DateTime     @db.Date
+  landingPage    String
+  sessions       Int
+
+  createdAt DateTime @default(now())
+
+  @@unique([organizationId, date, landingPage])
 }
 
 // ─────────────────────────────────────────────────────────────────────────

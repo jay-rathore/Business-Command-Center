@@ -11,3 +11,4 @@ export * from './types/dashboard';
 export * from './types/quotations';
 export * from './types/integrations';
 export * from './types/platform-admin';
+export * from './types/traffic-intelligence';

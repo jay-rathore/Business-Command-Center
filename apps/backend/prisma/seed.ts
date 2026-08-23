@@ -5,6 +5,7 @@ import {
   CustomerType,
   DealerStatus,
   OrderStatus,
+  Prisma,
   PrismaClient,
   ProjectCategory,
   ProjectStage,
@@ -588,6 +589,186 @@ async function seedMarketingCampaigns(organizationId: string) {
   console.log(`Seeded ${MARKETING_CAMPAIGNS.length} placeholder marketing campaigns (Google Ads/Website/WhatsApp/Organic/Other — Meta Ads comes from the real sync)`);
 }
 
+const TRAFFIC_INTEL_DAYS = 60;
+// Days-ago markers for the two deliberate, demoable stories: a Meta pause causing a traffic dip,
+// and a Google Ads budget increase causing a traffic spike — see Traffic Intelligence plan §6.
+const DIP_EVENT_DAYS_AGO = 14; // campaign paused
+const DIP_VISIBLE_DAYS_AGO = 13; // traffic drop shows up the next day, once the pause has propagated
+const SPIKE_EVENT_DAYS_AGO = 5; // budget increased
+const SPIKE_VISIBLE_DAYS_AGO = 4;
+
+async function seedTrafficIntelligence(organizationId: string) {
+  const existingDays = await prisma.websiteAnalyticsDaily.count({ where: { organizationId } });
+  if (existingDays > 0) {
+    console.log('Website analytics already has data (real GA4 sync or prior seed) — skipping Traffic Intelligence demo seed');
+    return;
+  }
+
+  const pausedCampaign = await prisma.marketingCampaign.create({
+    data: {
+      organizationId,
+      name: 'Meta Campaign — Monsoon Push',
+      platform: CampaignPlatform.META_ADS,
+      status: CampaignStatus.PAUSED,
+      spend: 62000,
+      leadsCount: 145,
+      revenue: 0, // real-spend Meta rows never carry fabricated revenue, see marketing.service.ts
+      impressions: 410000,
+      clicks: 9800,
+      ctr: 2.39,
+      avgCpc: 6.3,
+      startDate: daysAgo(45),
+      endDate: null,
+      notes: 'Paused mid-campaign — see CampaignEvent history for the Traffic Intelligence demo.',
+    },
+  });
+  const budgetIncreasedCampaign = await prisma.marketingCampaign.create({
+    data: {
+      organizationId,
+      name: 'Google Ads — Diwali Surge',
+      platform: CampaignPlatform.GOOGLE_ADS,
+      status: CampaignStatus.ACTIVE,
+      spend: 71000,
+      leadsCount: 203,
+      revenue: 0,
+      impressions: 520000,
+      clicks: 14200,
+      ctr: 2.73,
+      avgCpc: 5.0,
+      dailyBudget: 4000,
+      startDate: daysAgo(40),
+      endDate: null,
+      notes: 'Budget increased mid-campaign — see CampaignEvent history for the Traffic Intelligence demo.',
+    },
+  });
+
+  await prisma.campaignEvent.create({
+    data: {
+      organizationId,
+      campaignId: pausedCampaign.id,
+      field: 'status',
+      oldValue: 'ACTIVE',
+      newValue: 'PAUSED',
+      detectedAt: daysAgo(DIP_EVENT_DAYS_AGO),
+    },
+  });
+  await prisma.campaignEvent.create({
+    data: {
+      organizationId,
+      campaignId: budgetIncreasedCampaign.id,
+      field: 'dailyBudget',
+      oldValue: '1500',
+      newValue: '4000',
+      detectedAt: daysAgo(SPIKE_EVENT_DAYS_AGO),
+    },
+  });
+
+  const websiteDaily: Prisma.WebsiteAnalyticsDailyCreateManyInput[] = [];
+  const channelDaily: Prisma.WebsiteChannelDailyCreateManyInput[] = [];
+  const searchDaily: Prisma.SearchConsoleDailyCreateManyInput[] = [];
+  const landingPageDaily: Prisma.WebsiteLandingPageDailyCreateManyInput[] = [];
+  const metaDaily: Prisma.AdPlatformDailyMetricCreateManyInput[] = [];
+  const googleDaily: Prisma.AdPlatformDailyMetricCreateManyInput[] = [];
+
+  for (let d = TRAFFIC_INTEL_DAYS - 1; d >= 0; d--) {
+    const date = daysAgo(d);
+    const weekday = date.getUTCDay();
+    const isWeekend = weekday === 0 || weekday === 6;
+
+    const pausedNow = d <= DIP_VISIBLE_DAYS_AGO; // Meta campaign stays paused from that point on
+    const budgetBoostedNow = d <= SPIKE_VISIBLE_DAYS_AGO; // Google budget stays up from that point on
+
+    const baseSessions = (isWeekend ? 620 : 820) + randInt(-40, 40);
+    const paidSocialSessions = pausedNow ? randInt(15, 40) : randInt(180, 240);
+    const paidSearchSessions = budgetBoostedNow ? randInt(320, 400) : randInt(130, 180);
+    const organicSessions = (isWeekend ? 260 : 340) + randInt(-25, 25);
+    const directSessions = 120 + randInt(-15, 15);
+    const referralSessions = 60 + randInt(-10, 10);
+
+    const totalSessions = organicSessions + paidSocialSessions + paidSearchSessions + directSessions + referralSessions;
+    const activeUsers = Math.round(totalSessions * 0.82);
+    const newUsers = Math.round(activeUsers * 0.58);
+    const pageViews = Math.round(totalSessions * randWeighted<number>([[2.4, 5], [2.8, 3], [3.2, 2]]));
+    const conversions = Math.round(totalSessions * (0.018 + rng() * 0.01));
+
+    websiteDaily.push({
+      organizationId,
+      date,
+      sessions: totalSessions,
+      activeUsers,
+      newUsers,
+      pageViews,
+      conversions,
+      engagementRate: 0.55 + rng() * 0.1,
+      avgSessionSeconds: 90 + randInt(-15, 30),
+    });
+
+    channelDaily.push(
+      { organizationId, date, channel: 'Organic Search', sessions: organicSessions, conversions: Math.round(organicSessions * 0.015) },
+      { organizationId, date, channel: 'Paid Social', sessions: paidSocialSessions, conversions: Math.round(paidSocialSessions * 0.025) },
+      { organizationId, date, channel: 'Paid Search', sessions: paidSearchSessions, conversions: Math.round(paidSearchSessions * 0.025) },
+      { organizationId, date, channel: 'Direct', sessions: directSessions, conversions: Math.round(directSessions * 0.012) },
+      { organizationId, date, channel: 'Referral', sessions: referralSessions, conversions: Math.round(referralSessions * 0.01) },
+    );
+
+    // Search Console stays flat throughout — the demo's "what did not cause it" evidence.
+    const searchClicks = 210 + randInt(-20, 20);
+    const searchImpressions = searchClicks * randInt(14, 18);
+    searchDaily.push({
+      organizationId,
+      date,
+      clicks: searchClicks,
+      impressions: searchImpressions,
+      ctr: searchClicks / searchImpressions,
+      position: 8.5 + rng() * 1.5,
+    });
+
+    landingPageDaily.push(
+      { organizationId, date, landingPage: '/products/hpl-kitchen-panels', sessions: budgetBoostedNow ? randInt(180, 230) : randInt(60, 90) },
+      { organizationId, date, landingPage: '/products/exterior-cladding', sessions: randInt(90, 130) },
+      { organizationId, date, landingPage: '/', sessions: randInt(140, 190) },
+    );
+
+    const metaSpend = pausedNow ? 0 : 900 + randInt(-100, 150);
+    metaDaily.push({
+      organizationId,
+      campaignId: pausedCampaign.id,
+      platform: CampaignPlatform.META_ADS,
+      date,
+      spend: metaSpend,
+      impressions: pausedNow ? 0 : 6000 + randInt(-500, 800),
+      clicks: pausedNow ? 0 : 140 + randInt(-20, 30),
+      conversions: pausedNow ? 0 : randInt(2, 6),
+      ctr: pausedNow ? 0 : 2.3 + rng() * 0.4,
+      avgCpc: pausedNow ? 0 : 6 + rng(),
+    });
+
+    const googleSpend = budgetBoostedNow ? 3600 + randInt(-200, 300) : 1400 + randInt(-100, 150);
+    googleDaily.push({
+      organizationId,
+      campaignId: budgetIncreasedCampaign.id,
+      platform: CampaignPlatform.GOOGLE_ADS,
+      date,
+      spend: googleSpend,
+      impressions: budgetBoostedNow ? 15000 + randInt(-1000, 1500) : 6500 + randInt(-500, 700),
+      clicks: budgetBoostedNow ? 420 + randInt(-30, 40) : 175 + randInt(-20, 25),
+      conversions: budgetBoostedNow ? randInt(8, 14) : randInt(3, 7),
+      ctr: 2.5 + rng() * 0.4,
+      avgCpc: 5 + rng() * 0.8,
+    });
+  }
+
+  await prisma.websiteAnalyticsDaily.createMany({ data: websiteDaily });
+  await prisma.websiteChannelDaily.createMany({ data: channelDaily });
+  await prisma.searchConsoleDaily.createMany({ data: searchDaily });
+  await prisma.websiteLandingPageDaily.createMany({ data: landingPageDaily });
+  await prisma.adPlatformDailyMetric.createMany({ data: [...metaDaily, ...googleDaily] });
+
+  console.log(
+    `Seeded ${TRAFFIC_INTEL_DAYS} days of Traffic Intelligence demo data — Meta pause dip on ${daysAgo(DIP_EVENT_DAYS_AGO).toISOString().slice(0, 10)}, Google budget spike on ${daysAgo(SPIKE_EVENT_DAYS_AGO).toISOString().slice(0, 10)}`,
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // M6 — Leads
 // ─────────────────────────────────────────────────────────────────────────
@@ -1048,6 +1229,7 @@ async function main() {
   await seedOrders(organizationId, execIds, dealerIds, customerIds);
   await seedSalesTargets(organizationId, execIds);
   await seedMarketingCampaigns(organizationId);
+  await seedTrafficIntelligence(organizationId);
 
   const architectIds = await seedArchitects(organizationId);
   const builderIds = await seedBuilders(organizationId);

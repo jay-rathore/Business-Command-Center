@@ -4,6 +4,7 @@ import { CampaignListItem, ChannelBreakdownEntry, MarketingKpis, PaginatedRespon
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MarketingView } from "./MarketingView";
 import { SiteAnalyticsView } from "./SiteAnalyticsView";
+import { TrafficIntelligencePanel } from "./traffic-intelligence/TrafficIntelligencePanel";
 
 export function MarketingTabs({
   initialKpis,
@@ -27,8 +28,9 @@ export function MarketingTabs({
       <TabsContent value="campaigns">
         <MarketingView initialKpis={initialKpis} initialList={initialList} initialBreakdown={initialBreakdown} />
       </TabsContent>
-      <TabsContent value="site">
+      <TabsContent value="site" className="flex flex-col gap-8">
         <SiteAnalyticsView initialSiteAnalytics={initialSiteAnalytics} initialSearchConsole={initialSearchConsole} />
+        <TrafficIntelligencePanel />
       </TabsContent>
     </Tabs>
   );

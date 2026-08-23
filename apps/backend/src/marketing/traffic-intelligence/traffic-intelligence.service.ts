@@ -1,0 +1,357 @@
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { PRISMA_EXTENDED_CLIENT } from '../../prisma/prisma-extended.provider';
+import type { ExtendedPrismaClient } from '../../prisma/prisma-extended.provider';
+import { TenantContext } from '../../common/context/tenant-context';
+import {
+  InvestigationQuery,
+  TrafficChannelEntry,
+  TrafficEventDetail,
+  TrafficInvestigationResult,
+  TrafficOverview,
+  TrafficTimelineEvent,
+} from '@hpl/shared';
+import { RootCauseEngineService } from './root-cause-engine.service';
+import { InvestigationQueryParserService } from './investigation-query-parser.service';
+import { OpenAiTrafficNarrativeComposer } from './narrative-composer.service';
+import { TRAFFIC_NARRATIVE_COMPOSER } from './traffic-narrative.port';
+import type { TrafficNarrativePort } from './traffic-narrative.port';
+import { detectAnomaly } from './analysis/anomaly-detection.util';
+import {
+  DatePeriod,
+  parseDateOnly,
+  percentChange,
+  toDateKey,
+} from './analysis/period.util';
+
+const DEFAULT_WINDOW_DAYS = 30;
+const ANOMALY_BASELINE_LOOKBACK_DAYS = 28; // extra history pulled so the first days of the window still get a real baseline
+
+@Injectable()
+export class TrafficIntelligenceService {
+  private readonly logger = new Logger(TrafficIntelligenceService.name);
+
+  constructor(
+    @Inject(PRISMA_EXTENDED_CLIENT)
+    private readonly prisma: ExtendedPrismaClient,
+    private readonly rootCauseEngine: RootCauseEngineService,
+    private readonly queryParser: InvestigationQueryParserService,
+    private readonly openAiComposer: OpenAiTrafficNarrativeComposer,
+    @Inject(TRAFFIC_NARRATIVE_COMPOSER)
+    private readonly fallbackComposer: TrafficNarrativePort,
+  ) {}
+
+  async getOverview(
+    dateFromStr?: string,
+    dateToStr?: string,
+  ): Promise<TrafficOverview> {
+    const organizationId = TenantContext.get().organizationId;
+    const { from, to } = this.resolveRange(dateFromStr, dateToStr);
+    const extendedFrom = new Date(
+      from.getTime() - ANOMALY_BASELINE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+    );
+
+    const [extendedRows, channelRows] = await Promise.all([
+      this.prisma.websiteAnalyticsDaily.findMany({
+        where: { organizationId, date: { gte: extendedFrom, lte: to } },
+        orderBy: { date: 'asc' },
+      }),
+      this.prisma.websiteChannelDaily.findMany({
+        where: { organizationId, date: { gte: from, lte: to } },
+      }),
+    ]);
+
+    const anomalySeries = extendedRows.map((r) => ({
+      date: r.date,
+      value: r.activeUsers,
+    }));
+    const windowRows = extendedRows.filter(
+      (r) =>
+        r.date.getTime() >= from.getTime() && r.date.getTime() <= to.getTime(),
+    );
+
+    const series = windowRows.map((r) => {
+      const index = anomalySeries.findIndex(
+        (p) => toDateKey(p.date) === toDateKey(r.date),
+      );
+      const anomaly = detectAnomaly(anomalySeries, index);
+      const returningVisitors = Math.max(0, r.activeUsers - r.newUsers);
+      return {
+        date: toDateKey(r.date),
+        visitors: r.activeUsers,
+        sessions: r.sessions,
+        pageViews: r.pageViews,
+        newVisitors: r.newUsers,
+        returningVisitors,
+        conversions: r.conversions,
+        conversionRate:
+          r.sessions > 0 ? (r.conversions / r.sessions) * 100 : null,
+        isAnomaly: anomaly.isAnomaly,
+        anomalyDirection: anomaly.direction,
+      };
+    });
+
+    const channelTotals = new Map<string, TrafficChannelEntry>();
+    for (const row of channelRows) {
+      const existing = channelTotals.get(row.channel) ?? {
+        channel: row.channel,
+        sessions: 0,
+        conversions: 0,
+      };
+      channelTotals.set(row.channel, {
+        channel: row.channel,
+        sessions: existing.sessions + row.sessions,
+        conversions: existing.conversions + row.conversions,
+      });
+    }
+
+    const totals = windowRows.reduce(
+      (acc, r) => ({
+        visitors: acc.visitors + r.activeUsers,
+        sessions: acc.sessions + r.sessions,
+        pageViews: acc.pageViews + r.pageViews,
+        conversions: acc.conversions + r.conversions,
+      }),
+      { visitors: 0, sessions: 0, pageViews: 0, conversions: 0 },
+    );
+
+    return {
+      series,
+      channelBreakdown: Array.from(channelTotals.values()).sort(
+        (a, b) => b.sessions - a.sessions,
+      ),
+      totals: {
+        ...totals,
+        conversionRate:
+          totals.sessions > 0
+            ? (totals.conversions / totals.sessions) * 100
+            : null,
+      },
+      deltas: this.computeDeltas(windowRows.map((r) => r.activeUsers)),
+    };
+  }
+
+  async getTimeline(
+    dateFromStr?: string,
+    dateToStr?: string,
+  ): Promise<TrafficTimelineEvent[]> {
+    const organizationId = TenantContext.get().organizationId;
+    const { from, to } = this.resolveRange(dateFromStr, dateToStr);
+
+    const [events, overview] = await Promise.all([
+      this.prisma.campaignEvent.findMany({
+        where: { organizationId, detectedAt: { gte: from, lte: to } },
+        include: {
+          campaign: { select: { id: true, name: true, platform: true } },
+        },
+        orderBy: { detectedAt: 'asc' },
+      }),
+      this.getOverview(dateFromStr, dateToStr),
+    ]);
+
+    const eventItems: TrafficTimelineEvent[] = events.map((e) => ({
+      id: e.id,
+      type:
+        e.field === 'status'
+          ? 'STATUS_CHANGED'
+          : e.field === 'dailyBudget'
+            ? 'BUDGET_CHANGED'
+            : 'NAME_CHANGED',
+      occurredAt: e.detectedAt.toISOString(),
+      label: `${e.campaign.name}: ${e.field} ${e.oldValue ?? '—'} → ${e.newValue ?? '—'}`,
+      campaignId: e.campaignId,
+      campaignName: e.campaign.name,
+      platform: e.campaign.platform,
+    }));
+
+    const anomalyItems: TrafficTimelineEvent[] = overview.series
+      .filter((d) => d.isAnomaly)
+      .map((d) => ({
+        id: `anomaly:${d.date}`,
+        type: 'TRAFFIC_ANOMALY',
+        occurredAt: `${d.date}T00:00:00.000Z`,
+        label: `Traffic ${d.anomalyDirection === 'up' ? 'spike' : 'drop'} on ${d.date}`,
+        campaignId: null,
+        campaignName: null,
+        platform: null,
+      }));
+
+    return [...eventItems, ...anomalyItems].sort((a, b) =>
+      a.occurredAt.localeCompare(b.occurredAt),
+    );
+  }
+
+  async getEventDetail(id: string): Promise<TrafficEventDetail> {
+    if (id.startsWith('anomaly:'))
+      return this.getAnomalyDetail(id.slice('anomaly:'.length));
+
+    const organizationId = TenantContext.get().organizationId;
+    const event = await this.prisma.campaignEvent.findFirst({
+      where: { id, organizationId },
+      include: {
+        campaign: { select: { id: true, name: true, platform: true } },
+      },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+
+    const day = new Date(toDateKey(event.detectedAt) + 'T00:00:00.000Z');
+    const dayBefore = new Date(day.getTime() - 24 * 60 * 60 * 1000);
+    const [afterRow, beforeRow] = await Promise.all([
+      this.prisma.websiteAnalyticsDaily.findFirst({
+        where: { organizationId, date: day },
+      }),
+      this.prisma.websiteAnalyticsDaily.findFirst({
+        where: { organizationId, date: dayBefore },
+      }),
+    ]);
+    const delta =
+      afterRow && beforeRow
+        ? percentChange(beforeRow.activeUsers, afterRow.activeUsers)
+        : null;
+
+    return {
+      id: event.id,
+      type:
+        event.field === 'status'
+          ? 'STATUS_CHANGED'
+          : event.field === 'dailyBudget'
+            ? 'BUDGET_CHANGED'
+            : 'NAME_CHANGED',
+      occurredAt: event.detectedAt.toISOString(),
+      label: `${event.campaign.name}: ${event.field} ${event.oldValue ?? '—'} → ${event.newValue ?? '—'}`,
+      campaignId: event.campaignId,
+      campaignName: event.campaign.name,
+      platform: event.campaign.platform,
+      field: event.field,
+      oldValue: event.oldValue,
+      newValue: event.newValue,
+      trafficImpact:
+        delta != null
+          ? `Website traffic ${delta >= 0 ? 'increased' : 'decreased'} ${Math.abs(delta).toFixed(0)}% the day this was detected, vs the day before.`
+          : null,
+      aiInterpretation:
+        'Ask the AI Investigation panel about this date for a full cross-platform root-cause analysis.',
+    };
+  }
+
+  async investigate(
+    query: InvestigationQuery,
+  ): Promise<TrafficInvestigationResult> {
+    let dateFrom = query.dateFrom;
+    let dateTo = query.dateTo;
+    let intent: TrafficInvestigationResult['intent'] = 'general';
+
+    if (query.question && (!dateFrom || !dateTo)) {
+      const parsed = await this.queryParser.parse(query.question);
+      dateFrom = parsed.dateFrom;
+      dateTo = parsed.dateTo;
+      intent = parsed.intent;
+    } else if (!dateFrom || !dateTo) {
+      throw new BadRequestException(
+        'Provide either a question or an explicit dateFrom/dateTo range',
+      );
+    }
+
+    if (intent === 'recommend_campaign') {
+      return this.recommendCampaignPlaceholder();
+    }
+
+    const result = await this.rootCauseEngine.investigate({
+      intent,
+      dateFrom: parseDateOnly(dateFrom),
+      dateTo: parseDateOnly(dateTo),
+    });
+
+    try {
+      return await this.openAiComposer.compose(result);
+    } catch (err) {
+      this.logger.warn(
+        `Narrative composition via OpenAI unavailable, using rule-based phrasing: ${err instanceof Error ? err.message : err}`,
+      );
+      return this.fallbackComposer.compose(result);
+    }
+  }
+
+  private async getAnomalyDetail(dateKey: string): Promise<TrafficEventDetail> {
+    const day = parseDateOnly(dateKey);
+    const investigation = await this.rootCauseEngine.investigate({
+      intent: 'general',
+      dateFrom: day,
+      dateTo: day,
+    });
+
+    return {
+      id: `anomaly:${dateKey}`,
+      type: 'TRAFFIC_ANOMALY',
+      occurredAt: `${dateKey}T00:00:00.000Z`,
+      label: `Traffic ${investigation.trafficChange.direction === 'up' ? 'spike' : 'drop'} on ${dateKey}`,
+      campaignId: investigation.primaryCause?.campaignId ?? null,
+      campaignName: investigation.primaryCause?.campaignName ?? null,
+      platform: null,
+      field: null,
+      oldValue: null,
+      newValue: null,
+      trafficImpact: `${investigation.trafficChange.visitorsBefore} → ${investigation.trafficChange.visitorsAfter} visitors (${investigation.trafficChange.percent?.toFixed(0) ?? '—'}%)`,
+      aiInterpretation:
+        investigation.primaryCause?.summary ?? investigation.summary,
+    };
+  }
+
+  private recommendCampaignPlaceholder(): TrafficInvestigationResult {
+    return {
+      supported: false,
+      intent: 'recommend_campaign',
+      summary:
+        'Campaign recommendations are coming in a follow-up update to Traffic Intelligence.',
+      trafficChange: {
+        direction: 'flat',
+        percent: null,
+        visitorsBefore: 0,
+        visitorsAfter: 0,
+        comparedWith: '',
+      },
+      primaryCause: null,
+      supportingEvidence: [],
+      contributingFactors: [],
+      notCausedBy: [],
+      recommendedAction:
+        'For now, compare campaign performance directly on the Campaigns tab.',
+      confidence: { score: 0, label: 'Low' },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private resolveRange(dateFromStr?: string, dateToStr?: string): DatePeriod {
+    const to = dateToStr
+      ? parseDateOnly(dateToStr)
+      : parseDateOnly(toDateKey(new Date()));
+    const from = dateFromStr
+      ? parseDateOnly(dateFromStr)
+      : new Date(
+          to.getTime() - (DEFAULT_WINDOW_DAYS - 1) * 24 * 60 * 60 * 1000,
+        );
+    return { from, to };
+  }
+
+  private computeDeltas(visitorsByDay: number[]): TrafficOverview['deltas'] {
+    const n = visitorsByDay.length;
+    const dayOverDay =
+      n >= 2 ? percentChange(visitorsByDay[n - 2], visitorsByDay[n - 1]) : null;
+
+    let weekOverWeek: number | null = null;
+    if (n >= 14) {
+      const lastWeek = visitorsByDay.slice(n - 7).reduce((a, b) => a + b, 0);
+      const priorWeek = visitorsByDay
+        .slice(n - 14, n - 7)
+        .reduce((a, b) => a + b, 0);
+      weekOverWeek = percentChange(priorWeek, lastWeek);
+    }
+
+    return { dayOverDay, weekOverWeek };
+  }
+}

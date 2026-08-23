@@ -37,6 +37,10 @@ const ORG_SCOPED_MODELS = new Set([
   'SearchConsoleDaily',
   'SearchConsoleTopQuery',
   'MarketingLeadAttribution',
+  'CampaignEvent',
+  'AdPlatformDailyMetric',
+  'WebsiteChannelDaily',
+  'WebsiteLandingPageDaily',
   'Complaint',
   'WarrantyClaim',
   'Notification',
@@ -69,13 +73,19 @@ export function orgScopeExtension() {
         $allModels: {
           async findMany({ model, args, query }) {
             if (ORG_SCOPED_MODELS.has(model)) {
-              args.where = { ...args.where, organizationId: TenantContext.get().organizationId };
+              args.where = {
+                ...args.where,
+                organizationId: TenantContext.get().organizationId,
+              };
             }
             return query(args);
           },
           async findFirst({ model, args, query }) {
             if (ORG_SCOPED_MODELS.has(model)) {
-              args.where = { ...args.where, organizationId: TenantContext.get().organizationId };
+              args.where = {
+                ...args.where,
+                organizationId: TenantContext.get().organizationId,
+              };
             }
             return query(args);
           },
@@ -84,26 +94,32 @@ export function orgScopeExtension() {
               args.where = {
                 ...args.where,
                 organizationId: TenantContext.get().organizationId,
-              } as typeof args.where;
+              };
             }
             return query(args);
           },
           async count({ model, args, query }) {
             if (ORG_SCOPED_MODELS.has(model)) {
-              args.where = { ...args.where, organizationId: TenantContext.get().organizationId };
+              args.where = {
+                ...args.where,
+                organizationId: TenantContext.get().organizationId,
+              };
             }
             return query(args);
           },
           async aggregate({ model, args, query }) {
             if (ORG_SCOPED_MODELS.has(model)) {
-              args.where = { ...args.where, organizationId: TenantContext.get().organizationId };
+              args.where = {
+                ...args.where,
+                organizationId: TenantContext.get().organizationId,
+              };
             }
             return query(args);
           },
           async groupBy({ model, args, query }) {
             if (ORG_SCOPED_MODELS.has(model)) {
               (args as Record<string, unknown>).where = {
-                ...(args as Record<string, unknown>).where as object,
+                ...((args as Record<string, unknown>).where as object),
                 organizationId: TenantContext.get().organizationId,
               };
             }
@@ -123,7 +139,7 @@ export function orgScopeExtension() {
               const organizationId = TenantContext.get().organizationId;
               args.data = Array.isArray(args.data)
                 ? args.data.map((row) => ({ ...row, organizationId }))
-                : ({ ...args.data, organizationId } as typeof args.data);
+                : { ...args.data, organizationId };
             }
             return query(args);
           },
@@ -132,22 +148,34 @@ export function orgScopeExtension() {
               args.where = {
                 ...args.where,
                 organizationId: TenantContext.get().organizationId,
-              } as typeof args.where;
+              };
             }
             return query(args);
           },
           async updateMany({ model, args, query }) {
             if (ORG_SCOPED_MODELS.has(model)) {
-              args.where = { ...args.where, organizationId: TenantContext.get().organizationId };
+              args.where = {
+                ...args.where,
+                organizationId: TenantContext.get().organizationId,
+              };
             }
             return query(args);
           },
           async upsert({ model, args, query }) {
             if (ORG_SCOPED_MODELS.has(model)) {
               const organizationId = TenantContext.get().organizationId;
-              args.where = { ...args.where, organizationId } as typeof args.where;
-              args.create = { ...args.create, organizationId } as typeof args.create;
-              args.update = { ...args.update, organizationId } as typeof args.update;
+              args.where = {
+                ...args.where,
+                organizationId,
+              };
+              args.create = {
+                ...args.create,
+                organizationId,
+              } as typeof args.create;
+              args.update = {
+                ...args.update,
+                organizationId,
+              };
             }
             return query(args);
           },
@@ -156,13 +184,16 @@ export function orgScopeExtension() {
               args.where = {
                 ...args.where,
                 organizationId: TenantContext.get().organizationId,
-              } as typeof args.where;
+              };
             }
             return query(args);
           },
           async deleteMany({ model, args, query }) {
             if (ORG_SCOPED_MODELS.has(model)) {
-              args.where = { ...args.where, organizationId: TenantContext.get().organizationId };
+              args.where = {
+                ...args.where,
+                organizationId: TenantContext.get().organizationId,
+              };
             }
             return query(args);
           },
