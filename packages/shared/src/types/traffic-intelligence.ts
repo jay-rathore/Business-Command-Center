@@ -91,10 +91,16 @@ export interface CampaignRecommendationCandidate {
   reasonNotSelected: string | null;
 }
 
+export interface CampaignDataQualityWarning {
+  campaignName: string;
+  issue: string;
+}
+
 export interface CampaignRecommendationResult {
   recommended: CampaignRecommendationCandidate | null;
   alternatives: CampaignRecommendationCandidate[];
   insufficientDataCampaigns: string[];
+  dataQualityWarnings: CampaignDataQualityWarning[];
   recommendationText: string;
   generatedAt: string;
 }

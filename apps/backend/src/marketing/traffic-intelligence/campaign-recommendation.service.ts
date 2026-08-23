@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  CampaignDataQualityWarning,
   CampaignRecommendationCandidate,
   CampaignRecommendationResult,
 } from '@hpl/shared';
@@ -25,6 +26,7 @@ interface RawMetrics {
   id: string;
   name: string;
   status: string;
+  clicks: number;
   conversionRate: number | null;
   costPerConversion: number | null;
   roas: number | null;
@@ -52,6 +54,7 @@ export class CampaignRecommendationService {
         id: c.id,
         name: c.name,
         status: c.status,
+        clicks: c.clicks,
         conversionRate: c.clicks > 0 ? (c.leadsCount / c.clicks) * 100 : null,
         costPerConversion: c.leadsCount > 0 ? spend / c.leadsCount : null,
         roas: revenue > 0 && spend > 0 ? revenue / spend : null,
@@ -60,12 +63,30 @@ export class CampaignRecommendationService {
       };
     });
 
-    const eligible = raw.filter((c) => {
-      const campaign = campaigns.find((row) => row.id === c.id)!;
-      return campaign.clicks >= MIN_CLICKS && c.leadsCount >= MIN_LEADS;
-    });
+    // A campaign reporting more leads than clicks is not possible for a genuine one-lead-per-click
+    // conversion action — it means the platform's "conversions" count is blended with something
+    // else (calls, page views, engagement...), not filtered to actual leads. Score against that
+    // number and the recommendation would just reward whichever campaign has the noisiest
+    // conversion tracking, so these are excluded and surfaced as a data-quality warning instead of
+    // silently folded into "insufficient data" (a different, unrelated problem).
+    const dataQualityWarnings: CampaignDataQualityWarning[] = raw
+      .filter((c) => c.leadsCount > c.clicks)
+      .map((c) => ({
+        campaignName: c.name,
+        issue: `Reports more leads than clicks (${c.leadsCount} vs ${c.clicks}) — its "conversions" tracking likely isn't filtered to real leads.`,
+      }));
+    const dataQualityIds = new Set(
+      raw.filter((c) => c.leadsCount > c.clicks).map((c) => c.id),
+    );
+
+    const eligible = raw.filter(
+      (c) =>
+        !dataQualityIds.has(c.id) &&
+        c.clicks >= MIN_CLICKS &&
+        c.leadsCount >= MIN_LEADS,
+    );
     const insufficientDataCampaigns = raw
-      .filter((c) => !eligible.includes(c))
+      .filter((c) => !eligible.includes(c) && !dataQualityIds.has(c.id))
       .map((c) => c.name);
 
     if (eligible.length === 0) {
@@ -73,6 +94,7 @@ export class CampaignRecommendationService {
         recommended: null,
         alternatives: [],
         insufficientDataCampaigns,
+        dataQualityWarnings,
         recommendationText: '',
         generatedAt: new Date().toISOString(),
       };
@@ -108,6 +130,7 @@ export class CampaignRecommendationService {
       recommended,
       alternatives,
       insufficientDataCampaigns,
+      dataQualityWarnings,
       recommendationText: this.buildRecommendationText(winnerRaw),
       generatedAt: new Date().toISOString(),
     };

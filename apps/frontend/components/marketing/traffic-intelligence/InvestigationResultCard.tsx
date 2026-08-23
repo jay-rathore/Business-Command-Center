@@ -34,7 +34,7 @@ function EvidenceList({ title, items }: { title: string; items: TrafficInvestiga
 }
 
 function RecommendationSection({ recommendation }: { recommendation: NonNullable<TrafficInvestigationResult["recommendation"]> }) {
-  const { recommended, alternatives, insufficientDataCampaigns } = recommendation;
+  const { recommended, alternatives, insufficientDataCampaigns, dataQualityWarnings } = recommendation;
 
   return (
     <div className="mt-3 flex flex-col gap-4">
@@ -71,6 +71,19 @@ function RecommendationSection({ recommendation }: { recommendation: NonNullable
 
       {insufficientDataCampaigns.length > 0 && (
         <p className="text-xs text-text-muted">Not scored (too little data yet): {insufficientDataCampaigns.join(", ")}</p>
+      )}
+
+      {dataQualityWarnings.length > 0 && (
+        <div className="rounded-sm border border-border bg-warning-tint p-3">
+          <span className="text-xs font-medium text-warning">Excluded — data quality</span>
+          <ul className="mt-1.5 flex flex-col gap-1">
+            {dataQualityWarnings.map((w) => (
+              <li key={w.campaignName} className="text-xs text-text-secondary">
+                <span className="font-medium">{w.campaignName}</span> — {w.issue}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
