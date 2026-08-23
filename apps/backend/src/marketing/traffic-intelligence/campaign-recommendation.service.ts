@@ -6,6 +6,8 @@ import {
 } from '@hpl/shared';
 import { PRISMA_EXTENDED_CLIENT } from '../../prisma/prisma-extended.provider';
 import type { ExtendedPrismaClient } from '../../prisma/prisma-extended.provider';
+import { TenantContext } from '../../common/context/tenant-context';
+import { DatePeriod, toDateKey } from './analysis/period.util';
 
 const MIN_CLICKS = 20;
 const MIN_LEADS = 3;
@@ -36,7 +38,11 @@ interface RawMetrics {
 
 /** Deterministic campaign-ranking engine — answers "which campaign should I re-run for the best
  * traffic and conversions" (Traffic Intelligence spec §6). Every score is a documented, min-max
- * normalized weighted sum over real MarketingCampaign fields; nothing is estimated by an LLM. */
+ * normalized weighted sum; nothing is estimated by an LLM. Two data sources feed the same ranking
+ * core (rankCampaigns): lifetime-cumulative MarketingCampaign fields when no period is given (the
+ * "best campaign overall" question), or period-summed AdPlatformDailyMetric rows when the caller
+ * asks about a specific date/range (e.g. "which campaign gave best results on Aug 5th") — without
+ * this, a date-scoped question would silently get the same lifetime answer as an undated one. */
 @Injectable()
 export class CampaignRecommendationService {
   constructor(
@@ -44,7 +50,12 @@ export class CampaignRecommendationService {
     private readonly prisma: ExtendedPrismaClient,
   ) {}
 
-  async recommend(): Promise<CampaignRecommendationResult> {
+  async recommend(period?: DatePeriod): Promise<CampaignRecommendationResult> {
+    if (period) return this.recommendForPeriod(period);
+    return this.recommendLifetime();
+  }
+
+  private async recommendLifetime(): Promise<CampaignRecommendationResult> {
     const campaigns = await this.prisma.marketingCampaign.findMany();
 
     const raw: RawMetrics[] = campaigns.map((c) => {
@@ -63,6 +74,83 @@ export class CampaignRecommendationService {
       };
     });
 
+    return this.rankCampaigns(raw, null);
+  }
+
+  /** AdPlatformDailyMetric only exists for Meta/Google Ads campaigns synced with Phase 1's daily
+   * insights pull (trailing 60 days) — a campaign with no rows in the period (not running yet,
+   * outside the sync window, or a WEBSITE/ORGANIC/OTHER-platform demo row with no daily data at
+   * all) naturally lands in "insufficient data" below rather than being silently skipped. Revenue
+   * isn't tracked per day (only lifetime, and only ever fabricated for demo rows — never against
+   * real spend, see marketing.service.ts), so ROAS is always null for a period-scoped ranking. */
+  private async recommendForPeriod(
+    period: DatePeriod,
+  ): Promise<CampaignRecommendationResult> {
+    const organizationId = TenantContext.get().organizationId;
+    const [campaigns, dailyRows] = await Promise.all([
+      this.prisma.marketingCampaign.findMany({
+        select: { id: true, name: true, status: true },
+      }),
+      this.prisma.adPlatformDailyMetric.findMany({
+        where: { organizationId, date: { gte: period.from, lte: period.to } },
+      }),
+    ]);
+
+    const totals = new Map<
+      string,
+      {
+        spend: number;
+        impressions: number;
+        clicks: number;
+        conversions: number;
+      }
+    >();
+    for (const row of dailyRows) {
+      const existing = totals.get(row.campaignId) ?? {
+        spend: 0,
+        impressions: 0,
+        clicks: 0,
+        conversions: 0,
+      };
+      totals.set(row.campaignId, {
+        spend: existing.spend + Number(row.spend),
+        impressions: existing.impressions + row.impressions,
+        clicks: existing.clicks + row.clicks,
+        conversions: existing.conversions + row.conversions,
+      });
+    }
+
+    const raw: RawMetrics[] = campaigns.map((c) => {
+      const t = totals.get(c.id) ?? {
+        spend: 0,
+        impressions: 0,
+        clicks: 0,
+        conversions: 0,
+      };
+      return {
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        clicks: t.clicks,
+        conversionRate: t.clicks > 0 ? (t.conversions / t.clicks) * 100 : null,
+        costPerConversion: t.conversions > 0 ? t.spend / t.conversions : null,
+        roas: null,
+        leadsCount: t.conversions,
+        ctr: t.impressions > 0 ? (t.clicks / t.impressions) * 100 : null,
+      };
+    });
+
+    const periodLabel =
+      toDateKey(period.from) === toDateKey(period.to)
+        ? `on ${toDateKey(period.from)}`
+        : `from ${toDateKey(period.from)} to ${toDateKey(period.to)}`;
+    return this.rankCampaigns(raw, periodLabel);
+  }
+
+  private rankCampaigns(
+    raw: RawMetrics[],
+    periodLabel: string | null,
+  ): CampaignRecommendationResult {
     // A campaign reporting more leads than clicks is not possible for a genuine one-lead-per-click
     // conversion action — it means the platform's "conversions" count is blended with something
     // else (calls, page views, engagement...), not filtered to actual leads. Score against that
@@ -95,7 +183,9 @@ export class CampaignRecommendationService {
         alternatives: [],
         insufficientDataCampaigns,
         dataQualityWarnings,
-        recommendationText: '',
+        recommendationText: periodLabel
+          ? `No campaign has enough click/lead data ${periodLabel} to confidently recommend one.`
+          : '',
         generatedAt: new Date().toISOString(),
       };
     }
@@ -131,7 +221,7 @@ export class CampaignRecommendationService {
       alternatives,
       insufficientDataCampaigns,
       dataQualityWarnings,
-      recommendationText: this.buildRecommendationText(winnerRaw),
+      recommendationText: this.buildRecommendationText(winnerRaw, periodLabel),
       generatedAt: new Date().toISOString(),
     };
   }
@@ -257,11 +347,15 @@ export class CampaignRecommendationService {
     return gaps[0].label;
   }
 
-  private buildRecommendationText(winner: RawMetrics): string {
+  private buildRecommendationText(
+    winner: RawMetrics,
+    periodLabel: string | null,
+  ): string {
     const name = winner.name;
+    const suffix = periodLabel ? ` ${periodLabel}` : '';
     if (winner.status === 'ACTIVE') {
-      return `"${name}" is already your strongest performer — consider scaling its budget further while monitoring conversion quality for the next 3–7 days.`;
+      return `"${name}" was your strongest performer${suffix} — consider scaling its budget further while monitoring conversion quality for the next 3–7 days.`;
     }
-    return `Re-launch "${name}" with a controlled budget increase and monitor performance for the first 3–7 days.`;
+    return `Re-launch "${name}" with a controlled budget increase and monitor performance for the first 3–7 days${suffix ? ` (it performed best${suffix})` : ''}.`;
   }
 }

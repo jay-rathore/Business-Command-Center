@@ -8,6 +8,12 @@ export interface ParsedInvestigationQuery {
   intent: InvestigationIntent;
   dateFrom: string;
   dateTo: string;
+  /** True when the question itself names or clearly implies a date/period ("yesterday",
+   * "15/08/2026", "last week", "on Aug 5th"). False when no date/period was mentioned at all and
+   * dateFrom/dateTo below are just the default fallback (yesterday) — callers that only want a
+   * period-scoped answer when the user actually asked for one (e.g. recommend_campaign) should
+   * check this rather than assuming dateFrom/dateTo were user-specified. */
+  dateWasExplicit: boolean;
 }
 
 const PARSE_TOOL_NAME = 'resolve_investigation_query';
@@ -31,7 +37,7 @@ const INTENT_DESCRIPTIONS: Record<InvestigationIntent, string> = {
   compare_periods:
     'The user wants a neutral side-by-side comparison of two named periods, WITHOUT asking "why" a change happened. Example: "compare this week to last week", "August vs July traffic numbers". If the question contains "why" plus a directional word (low/high/dropped/increased/decreased), it is why_low/why_high instead, never this — "why" always signals a root-cause question, not a plain comparison.',
   recommend_campaign:
-    'The user is asking WHICH SPECIFIC CAMPAIGN to run, re-run, or scale up — i.e. asking for a campaign pick/ranking. Example: "which campaign should I re-run", "what campaign converts best". Do NOT use this for general "what should I do to improve traffic" questions with no request for a specific campaign name — that is why_high or general instead, answered with the recommendedAction field, not a campaign ranking.',
+    'The user is asking WHICH SPECIFIC CAMPAIGN to run, re-run, scale up, or performed best — i.e. asking for a campaign pick/ranking, whether about all-time performance or a specific date ("which campaign gave best results on Aug 5th"). Example: "which campaign should I re-run", "what campaign converts best", "which campaign performed best last week". Do NOT use this for general "what should I do to improve traffic" questions with no request for a specific campaign name — that is why_high or general instead, answered with the recommendedAction field, not a campaign ranking.',
   general:
     'Anything else: "what happened on <date>", open-ended forward-looking advice ("what should I change to increase traffic next week"), or a factual question about a period that is not clearly a drop/spike/comparison/campaign-pick. This is the safe default — prefer it over guessing one of the other four.',
 };
@@ -62,8 +68,13 @@ const PARSE_TOOL_SCHEMA = {
           description:
             'Absolute end date of the period to investigate, YYYY-MM-DD. Same as dateFrom for a single-day question. For a forward-looking question ("next week"), there is no future data yet — use the most recent trailing period (last 7 days) instead so the answer is grounded in real data.',
         },
+        dateWasExplicit: {
+          type: 'boolean',
+          description:
+            'true if the question itself names or clearly implies a date/period ("yesterday", "15/08/2026", "last week", "on Aug 5th", "next week"). false only when no date/period is mentioned anywhere in the question and dateFrom/dateTo above are just your default fallback.',
+        },
       },
-      required: ['intent', 'dateFrom', 'dateTo'],
+      required: ['intent', 'dateFrom', 'dateTo', 'dateWasExplicit'],
     },
   },
 };
@@ -71,10 +82,11 @@ const PARSE_TOOL_SCHEMA = {
 const DDMMYYYY = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/;
 
 /** Turns a free-text question ("Why was my website traffic so low on 15/08/2026?") into a
- * structured {intent, dateFrom, dateTo} that RootCauseEngineService can run against — mirrors
- * business-card-ai-parser.service.ts's forced-tool-call pattern. Falls back to a regex/keyword
- * parser (handles the spec's DD/MM/YYYY format plus "yesterday"/"last week") when OPENAI_API_KEY
- * is unset or the call fails, so the investigate endpoint still works without AI configured. */
+ * structured {intent, dateFrom, dateTo, dateWasExplicit} that RootCauseEngineService /
+ * CampaignRecommendationService can run against — mirrors business-card-ai-parser.service.ts's
+ * forced-tool-call pattern. Falls back to a regex/keyword parser (handles the spec's DD/MM/YYYY
+ * format plus "yesterday"/"last week") when OPENAI_API_KEY is unset or the call fails, so the
+ * investigate endpoint still works without AI configured. */
 @Injectable()
 export class InvestigationQueryParserService {
   private readonly logger = new Logger(InvestigationQueryParserService.name);
@@ -149,25 +161,42 @@ export class InvestigationQueryParserService {
       const date = toDateKey(
         new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))),
       );
-      return { intent, dateFrom: date, dateTo: date };
+      return { intent, dateFrom: date, dateTo: date, dateWasExplicit: true };
     }
 
     if (lower.includes('last week')) {
       const to = toDateKey(new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000));
       const from = toDateKey(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
-      return { intent, dateFrom: from, dateTo: to };
+      return { intent, dateFrom: from, dateTo: to, dateWasExplicit: true };
     }
 
     if (lower.includes('today')) {
       const today = toDateKey(now);
-      return { intent, dateFrom: today, dateTo: today };
+      return { intent, dateFrom: today, dateTo: today, dateWasExplicit: true };
+    }
+
+    if (lower.includes('yesterday')) {
+      const yesterday = toDateKey(
+        new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000),
+      );
+      return {
+        intent,
+        dateFrom: yesterday,
+        dateTo: yesterday,
+        dateWasExplicit: true,
+      };
     }
 
     // Default: yesterday — the most common "why did traffic move" reference point when no date is given.
     const yesterday = toDateKey(
       new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000),
     );
-    return { intent, dateFrom: yesterday, dateTo: yesterday };
+    return {
+      intent,
+      dateFrom: yesterday,
+      dateTo: yesterday,
+      dateWasExplicit: false,
+    };
   }
 
   private classifyIntent(lower: string): InvestigationIntent {

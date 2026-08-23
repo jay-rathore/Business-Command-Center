@@ -279,12 +279,16 @@ export class TrafficIntelligenceService {
     let dateFrom = query.dateFrom;
     let dateTo = query.dateTo;
     let intent: TrafficInvestigationResult['intent'] = 'general';
+    // Explicit dateFrom/dateTo passed directly (e.g. a timeline-event drill-down) counts as
+    // explicit too — only the "question had no date at all, defaulted to yesterday" case is not.
+    let dateWasExplicit = Boolean(query.dateFrom && query.dateTo);
 
     if (query.question && (!dateFrom || !dateTo)) {
       const parsed = await this.queryParser.parse(query.question);
       dateFrom = parsed.dateFrom;
       dateTo = parsed.dateTo;
       intent = parsed.intent;
+      dateWasExplicit = parsed.dateWasExplicit;
     } else if (!dateFrom || !dateTo) {
       throw new BadRequestException(
         'Provide either a question or an explicit dateFrom/dateTo range',
@@ -292,8 +296,15 @@ export class TrafficIntelligenceService {
     }
 
     if (intent === 'recommend_campaign') {
-      const recommendation = await this.campaignRecommendation.recommend();
-      return this.buildRecommendationResponse(recommendation);
+      // Only scope the ranking to a period when the user actually asked about one ("which
+      // campaign gave best results on Aug 5th") — an undated "which campaign should I re-run"
+      // should rank by lifetime performance, not get silently scoped to a default single day.
+      const period: DatePeriod | undefined = dateWasExplicit
+        ? { from: parseDateOnly(dateFrom), to: parseDateOnly(dateTo) }
+        : undefined;
+      const recommendation =
+        await this.campaignRecommendation.recommend(period);
+      return this.buildRecommendationResponse(recommendation, period);
     }
 
     const result = await this.rootCauseEngine.investigate({
@@ -345,14 +356,22 @@ export class TrafficIntelligenceService {
    * barely edged out the alternative is a low-confidence pick even if its own score is high. */
   private buildRecommendationResponse(
     recommendation: CampaignRecommendationResult,
+    period?: DatePeriod,
   ): TrafficInvestigationResult {
+    const periodLabel = period
+      ? toDateKey(period.from) === toDateKey(period.to)
+        ? `on ${toDateKey(period.from)}`
+        : `from ${toDateKey(period.from)} to ${toDateKey(period.to)}`
+      : null;
+
     const winner = recommendation.recommended;
     if (!winner) {
       return {
         supported: false,
         intent: 'recommend_campaign',
-        summary:
-          'No campaign currently has enough click/lead history to confidently recommend one.',
+        summary: periodLabel
+          ? `No campaign has enough click/lead data ${periodLabel} to confidently recommend one.`
+          : 'No campaign currently has enough click/lead history to confidently recommend one.',
         trafficChange: {
           direction: 'flat',
           percent: null,
@@ -382,7 +401,9 @@ export class TrafficIntelligenceService {
     return {
       supported: true,
       intent: 'recommend_campaign',
-      summary: `"${winner.campaignName}" is the strongest candidate to re-run, based on conversion rate, cost per lead, and lead volume across your campaign history.`,
+      summary: periodLabel
+        ? `"${winner.campaignName}" gave the best results ${periodLabel}, based on conversion rate, cost per lead, and lead volume.`
+        : `"${winner.campaignName}" is the strongest candidate to re-run, based on conversion rate, cost per lead, and lead volume across your campaign history.`,
       trafficChange: {
         direction: 'flat',
         percent: null,
