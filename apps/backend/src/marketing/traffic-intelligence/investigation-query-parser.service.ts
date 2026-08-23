@@ -18,6 +18,7 @@ export interface ParsedInvestigationQuery {
 
 const PARSE_TOOL_NAME = 'resolve_investigation_query';
 const VALID_INTENTS: InvestigationIntent[] = [
+  'out_of_scope',
   'why_low',
   'why_high',
   'compare_periods',
@@ -30,6 +31,8 @@ const VALID_INTENTS: InvestigationIntent[] = [
 // and it defaulted to recommend_campaign/compare_periods far too often for plain investigation
 // questions. See classifyIntent() below for the matching regex-fallback taxonomy, kept in sync.
 const INTENT_DESCRIPTIONS: Record<InvestigationIntent, string> = {
+  out_of_scope:
+    'The question has NOTHING to do with website traffic, marketing campaigns, leads, conversions, or this business\'s marketing performance — general knowledge, personal, or entirely unrelated questions. Example: "who is the prime minister of India", "what\'s the weather today", "write me a poem", "what is 2+2". Checked FIRST, before every other intent — if the question isn\'t about this Command Center\'s marketing/traffic data at all, it is always this, never one of the others below.',
   why_low:
     'The user is asking WHY traffic/visitors DROPPED or was LOW. Example: "why was traffic low yesterday", "why did visitors decrease compared to last week". This takes priority over compare_periods even when a comparison baseline like "compared to last week" or "vs last month" is named — naming a baseline is just how the drop is being measured, not a request for a neutral side-by-side comparison.',
   why_high:
@@ -39,7 +42,7 @@ const INTENT_DESCRIPTIONS: Record<InvestigationIntent, string> = {
   recommend_campaign:
     'The user is asking WHICH SPECIFIC CAMPAIGN to run, re-run, scale up, or performed best — i.e. asking for a campaign pick/ranking, whether about all-time performance or a specific date ("which campaign gave best results on Aug 5th"). Example: "which campaign should I re-run", "what campaign converts best", "which campaign performed best last week". Do NOT use this for general "what should I do to improve traffic" questions with no request for a specific campaign name — that is why_high or general instead, answered with the recommendedAction field, not a campaign ranking.',
   general:
-    'Anything else: "what happened on <date>", open-ended forward-looking advice ("what should I change to increase traffic next week"), or a factual question about a period that is not clearly a drop/spike/comparison/campaign-pick. This is the safe default — prefer it over guessing one of the other four.',
+    'A traffic/marketing-related question that is not clearly a drop/spike/comparison/campaign-pick — "what happened on <date>", open-ended forward-looking advice ("what should I change to increase traffic next week"), or a factual question about website/campaign performance for a period. This is the safe default for ON-TOPIC questions — prefer it over guessing one of the other three when unsure, but never use it for a question that has nothing to do with marketing/traffic at all (that is out_of_scope).',
 };
 
 const PARSE_TOOL_SCHEMA = {
@@ -47,7 +50,7 @@ const PARSE_TOOL_SCHEMA = {
   function: {
     name: PARSE_TOOL_NAME,
     description:
-      'Resolve a free-text traffic question into a classified intent and a concrete absolute date range to investigate.',
+      'Resolve a free-text question into a classified intent and a concrete absolute date range to investigate. The question may not be about marketing/traffic at all — classify those as out_of_scope rather than forcing a traffic answer onto an unrelated question.',
     parameters: {
       type: 'object',
       properties: {
@@ -61,7 +64,7 @@ const PARSE_TOOL_SCHEMA = {
         dateFrom: {
           type: 'string',
           description:
-            'Absolute start date of the period to investigate, YYYY-MM-DD. If the question has no date/period reference at all, use yesterday.',
+            'Absolute start date of the period to investigate, YYYY-MM-DD. If the question has no date/period reference at all, use yesterday. For out_of_scope, just use yesterday — it is ignored.',
         },
         dateTo: {
           type: 'string',
@@ -80,6 +83,16 @@ const PARSE_TOOL_SCHEMA = {
 };
 
 const DDMMYYYY = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/;
+const DATE_SIGNAL =
+  /\b(today|yesterday|last week|last month|this week|this month)\b/;
+// Broad on-topic vocabulary for the no-AI-configured fallback — a question that matches neither
+// this nor a date reference is assumed to have nothing to do with marketing/traffic at all. This
+// is a blunter instrument than the OpenAI path's judgment call, but a safe default: it only
+// widens what counts as "on topic," so it can misclassify a truly novel on-topic phrasing as
+// out_of_scope, but should never do the more harmful thing (treat an unrelated question as a real
+// traffic investigation and fabricate a confident-sounding answer for it).
+const ON_TOPIC_KEYWORDS =
+  /\b(traffic|visitor|visitors|website|site|campaign|campaigns|lead|leads|conversion|conversions|session|sessions|click|clicks|spend|budget|marketing|analytics|search console|google ads|meta|facebook|instagram|ads?|revenue|roas|ctr|impressions?)\b/;
 
 /** Turns a free-text question ("Why was my website traffic so low on 15/08/2026?") into a
  * structured {intent, dateFrom, dateTo, dateWasExplicit} that RootCauseEngineService /
@@ -126,7 +139,7 @@ export class InvestigationQueryParserService {
           role: 'system',
           content: [
             `Today's date is ${toDateKey(now)} (YYYY-MM-DD). Resolve relative dates ("yesterday", "last week") against it.`,
-            'Classify the question into exactly one intent using this taxonomy (in order of precedence — only pick a specific intent if the question clearly matches it; "general" is the safe default):',
+            'Classify the question into exactly one intent using this taxonomy (in order of precedence — only pick a specific intent if the question clearly matches it; "general" is the safe default for ON-TOPIC questions, "out_of_scope" is checked first for anything else):',
             ...VALID_INTENTS.map((i) => `- ${i}: ${INTENT_DESCRIPTIONS[i]}`),
           ].join('\n'),
         },
@@ -220,6 +233,18 @@ export class InvestigationQueryParserService {
     if (/\b(high|spike|increase|up|surge|more|higher)\b/.test(lower))
       return 'why_high';
     if (/\b(compare|versus|vs\.?)\b/.test(lower)) return 'compare_periods';
-    return 'general';
+
+    // Fell through to the catch-all: only treat it as a legitimate "general" traffic/marketing
+    // question if it actually mentions marketing/traffic vocabulary or a recognizable date/period
+    // reference — otherwise it's likely unrelated entirely (e.g. "who is the prime minister of
+    // India") and forcing a traffic investigation onto it would fabricate a confident-sounding but
+    // meaningless answer. See ON_TOPIC_KEYWORDS/DATE_SIGNAL above.
+    if (
+      ON_TOPIC_KEYWORDS.test(lower) ||
+      DATE_SIGNAL.test(lower) ||
+      DDMMYYYY.test(lower)
+    )
+      return 'general';
+    return 'out_of_scope';
   }
 }

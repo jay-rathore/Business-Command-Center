@@ -295,6 +295,10 @@ export class TrafficIntelligenceService {
       );
     }
 
+    if (intent === 'out_of_scope') {
+      return this.buildOutOfScopeResponse();
+    }
+
     if (intent === 'recommend_campaign') {
       // Only scope the ranking to a period when the user actually asked about one ("which
       // campaign gave best results on Aug 5th") — an undated "which campaign should I re-run"
@@ -345,6 +349,34 @@ export class TrafficIntelligenceService {
       trafficImpact: `${investigation.trafficChange.visitorsBefore} → ${investigation.trafficChange.visitorsAfter} visitors (${investigation.trafficChange.percent?.toFixed(0) ?? '—'}%)`,
       aiInterpretation:
         investigation.primaryCause?.summary ?? investigation.summary,
+    };
+  }
+
+  /** Short-circuits before touching the database at all — a question with nothing to do with
+   * traffic/marketing (see out_of_scope in investigation-query-parser.service.ts) should never
+   * reach RootCauseEngineService, which would otherwise happily investigate yesterday's traffic
+   * and hand back a confident-sounding but meaningless answer to an unrelated question. */
+  private buildOutOfScopeResponse(): TrafficInvestigationResult {
+    return {
+      supported: false,
+      intent: 'out_of_scope',
+      summary:
+        "That doesn't look like a question about your website traffic or marketing campaigns — I can only help with those here.",
+      trafficChange: {
+        direction: 'flat',
+        percent: null,
+        visitorsBefore: 0,
+        visitorsAfter: 0,
+        comparedWith: '',
+      },
+      primaryCause: null,
+      supportingEvidence: [],
+      contributingFactors: [],
+      notCausedBy: [],
+      recommendedAction:
+        "Try asking about a traffic change, a campaign's performance, or which campaign to run next — for example one of the suggested questions above.",
+      confidence: { score: 0, label: 'Low' },
+      generatedAt: new Date().toISOString(),
     };
   }
 

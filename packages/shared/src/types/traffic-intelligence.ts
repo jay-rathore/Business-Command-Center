@@ -57,7 +57,7 @@ export interface TrafficEventDetail extends TrafficTimelineEvent {
   aiInterpretation: string | null;
 }
 
-export type InvestigationIntent = 'why_low' | 'why_high' | 'compare_periods' | 'recommend_campaign' | 'general';
+export type InvestigationIntent = 'why_low' | 'why_high' | 'compare_periods' | 'recommend_campaign' | 'general' | 'out_of_scope';
 
 export interface InvestigationQuery {
   question?: string;
