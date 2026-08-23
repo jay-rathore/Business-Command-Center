@@ -25,7 +25,8 @@
     "db:import-crm": "ts-node --transpile-only prisma/import-crm-snapshot.ts",
     "db:test-tenant:create": "ts-node --transpile-only prisma/manage-test-tenant.ts create",
     "db:test-tenant:delete": "ts-node --transpile-only prisma/manage-test-tenant.ts delete",
-    "db:migrate-env-to-connections": "ts-node --transpile-only prisma/migrate-env-to-connections.ts"
+    "db:migrate-env-to-connections": "ts-node --transpile-only prisma/migrate-env-to-connections.ts",
+    "db:set-platform-admin": "ts-node --transpile-only prisma/set-platform-admin.ts"
   },
   "dependencies": {
     "@google-analytics/data": "^7.0.0",

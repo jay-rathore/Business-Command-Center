@@ -10,3 +10,4 @@ export * from './types/projects';
 export * from './types/dashboard';
 export * from './types/quotations';
 export * from './types/integrations';
+export * from './types/platform-admin';

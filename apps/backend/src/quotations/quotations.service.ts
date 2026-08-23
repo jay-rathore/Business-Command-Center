@@ -252,7 +252,10 @@ export class QuotationsService {
     );
     if (!credentials) throw new BadRequestException("WhatsApp isn't configured for this organization yet");
 
-    const row = await this.prisma.quotation.findUnique({ where: { id }, include: { items: true, lead: true } });
+    const row = await this.prisma.quotation.findUnique({
+      where: { id },
+      include: { items: true, lead: true, companyProfile: true },
+    });
     if (!row) throw new NotFoundException("Quotation not found");
     if (!row.pdfPath) throw new NotFoundException("Quotation has no generated PDF");
 
@@ -267,7 +270,7 @@ export class QuotationsService {
         phone,
         mediaId,
         `${row.quotationCode}.pdf`,
-        `Your quotation ${row.quotationCode} from HPL Maker`,
+        `Your quotation ${row.quotationCode} from ${row.companyProfile.name}`,
       );
 
       const sentAt = new Date();
@@ -302,7 +305,10 @@ export class QuotationsService {
     );
     if (!credentials) throw new BadRequestException("Email isn't configured for this organization yet");
 
-    const row = await this.prisma.quotation.findUnique({ where: { id }, include: { items: true, lead: true } });
+    const row = await this.prisma.quotation.findUnique({
+      where: { id },
+      include: { items: true, lead: true, companyProfile: true },
+    });
     if (!row) throw new NotFoundException("Quotation not found");
     if (!row.pdfPath) throw new NotFoundException("Quotation has no generated PDF");
 
@@ -315,8 +321,8 @@ export class QuotationsService {
     try {
       await this.email.sendQuotationEmail(credentials, {
         to,
-        subject: `Your quotation ${row.quotationCode} from HPL Maker`,
-        bodyText: `Hi ${row.customerName},\n\nPlease find attached your quotation ${row.quotationCode}, valid until ${row.validUntil.toDateString()}.\n\nThank you for considering HPL Maker.`,
+        subject: `Your quotation ${row.quotationCode} from ${row.companyProfile.name}`,
+        bodyText: `Hi ${row.customerName},\n\nPlease find attached your quotation ${row.quotationCode}, valid until ${row.validUntil.toDateString()}.\n\nThank you for considering ${row.companyProfile.name}.`,
         attachmentBuffer: buffer,
         attachmentFilename: `${row.quotationCode}.pdf`,
       });

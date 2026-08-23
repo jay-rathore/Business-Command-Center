@@ -17,6 +17,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { CompanyProfilesModule } from './company-profiles/company-profiles.module';
 import { IntegrationConnectionsModule } from './integration-connections/integration-connections.module';
+import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { WhatsAppModule } from './integrations/whatsapp/whatsapp.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -45,6 +46,7 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
     CompanyProfilesModule,
     QuotationsModule,
     IntegrationConnectionsModule,
+    PlatformAdminModule,
   ],
   providers: [
     // Order matters: JwtAuthGuard populates req.user first, then Roles/Permissions guards read it.

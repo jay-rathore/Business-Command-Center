@@ -12,6 +12,13 @@ export interface CampaignListItem {
   revenue: number;
   cpl: number | null;
   roas: number | null;
+  impressions: number;
+  clicks: number;
+  ctr: number | null;
+  avgCpc: number | null;
+  conversionRate: number | null;
+  dailyBudget: number | null;
+  bidStrategy: string | null;
   source: CampaignSource;
   startDate: string;
   endDate: string | null;

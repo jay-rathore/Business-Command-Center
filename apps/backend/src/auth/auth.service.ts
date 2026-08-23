@@ -11,7 +11,7 @@ import { ttlToSeconds } from '../common/utils/ttl';
 const REFRESH_HASH_ROUNDS = 10;
 
 type UserWithRoleAndExec = Prisma.UserGetPayload<{
-  include: { role: true; salesExecutive: true };
+  include: { role: true; salesExecutive: true; organization: true };
 }>;
 
 export interface AuthTokens {
@@ -41,7 +41,7 @@ export class AuthService {
   async validateCredentials(email: string, password: string): Promise<UserWithRoleAndExec> {
     const candidates = await this.prisma.user.findMany({
       where: { email, isActive: true },
-      include: { role: true, salesExecutive: true },
+      include: { role: true, salesExecutive: true, organization: true },
     });
 
     const matches: UserWithRoleAndExec[] = [];
@@ -61,6 +61,9 @@ export class AuthService {
         'This email/password matches accounts in more than one organization. Please contact support.',
       );
     }
+    if (!matches[0].organization.isActive) {
+      throw new UnauthorizedException('This organization has been suspended');
+    }
     return matches[0];
   }
 
@@ -74,6 +77,7 @@ export class AuthService {
       roleName: user.role.name,
       permissions: permissionCodes,
       salesExecutiveId: user.salesExecutive?.id ?? null,
+      isPlatformAdmin: user.isPlatformAdmin,
     };
 
     const accessToken = this.jwt.sign(payload, {
@@ -105,11 +109,14 @@ export class AuthService {
   async refresh(userId: string, providedRefreshToken: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { role: true, salesExecutive: true },
+      include: { role: true, salesExecutive: true, organization: true },
     });
 
     if (!user || !user.isActive || !user.refreshTokenHash) {
       throw new UnauthorizedException('Session expired, please log in again');
+    }
+    if (!user.organization.isActive) {
+      throw new UnauthorizedException('This organization has been suspended');
     }
 
     const matches = await bcrypt.compare(providedRefreshToken, user.refreshTokenHash);
@@ -129,7 +136,7 @@ export class AuthService {
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { role: true, salesExecutive: true },
+      include: { role: true, salesExecutive: true, organization: true },
     });
     if (!user) throw new UnauthorizedException();
 
@@ -142,6 +149,9 @@ export class AuthService {
       role: user.role.name,
       permissions: permissionCodes,
       salesExecutiveId: user.salesExecutive?.id ?? null,
+      isPlatformAdmin: user.isPlatformAdmin,
+      organizationId: user.organizationId,
+      organizationName: user.organization.name,
     };
   }
 }

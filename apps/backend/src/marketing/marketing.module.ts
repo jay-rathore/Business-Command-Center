@@ -13,12 +13,16 @@ import { SearchConsoleSyncService } from "./search-console-sync/search-console-s
 
 @Module({
   imports: [IntegrationConnectionsModule],
+  // MarketingController must be registered last — its GET /api/marketing/:id route would
+  // otherwise swallow the sibling controllers' literal GET /api/marketing/google-analytics-sync
+  // and GET /api/marketing/search-console-sync routes (Nest/Express match routes in
+  // registration order, and a wildcard segment like :id matches any literal path segment too).
   controllers: [
-    MarketingController,
     MetaAdsSyncController,
     GoogleAdsSyncController,
     GoogleAnalyticsSyncController,
     SearchConsoleSyncController,
+    MarketingController,
   ],
   providers: [MarketingService, MetaAdsSyncService, GoogleAdsSyncService, GoogleAnalyticsSyncService, SearchConsoleSyncService],
 })

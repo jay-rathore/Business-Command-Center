@@ -15,6 +15,7 @@ interface MetaCampaignRaw {
   effective_status: string;
   start_time?: string;
   stop_time?: string;
+  bid_strategy?: string;
 }
 
 interface MetaInsightAction {
@@ -26,6 +27,17 @@ interface MetaInsightRaw {
   campaign_id: string;
   spend?: string;
   actions?: MetaInsightAction[];
+  impressions?: string;
+  clicks?: string;
+  ctr?: string;
+  cpc?: string;
+}
+
+// e.g. "LOWEST_COST_WITHOUT_CAP" -> "Lowest cost without cap"
+function formatBidStrategy(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const words = raw.toLowerCase().split("_");
+  return words[0].charAt(0).toUpperCase() + words[0].slice(1) + (words.length > 1 ? " " + words.slice(1).join(" ") : "");
 }
 
 export interface MetaAdsSyncResult {
@@ -81,8 +93,10 @@ export class MetaAdsSyncService {
     const base = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${adAccountId}`;
 
     const [campaignsRes, insightsRes] = await Promise.all([
-      fetch(`${base}/campaigns?fields=name,effective_status,start_time,stop_time&access_token=${accessToken}`),
-      fetch(`${base}/insights?fields=campaign_id,spend,actions&level=campaign&date_preset=maximum&access_token=${accessToken}`),
+      fetch(`${base}/campaigns?fields=name,effective_status,start_time,stop_time,bid_strategy&access_token=${accessToken}`),
+      fetch(
+        `${base}/insights?fields=campaign_id,spend,actions,impressions,clicks,ctr,cpc&level=campaign&date_preset=maximum&access_token=${accessToken}`,
+      ),
     ]);
 
     if (!campaignsRes.ok) throw new Error(`Meta campaigns API returned ${campaignsRes.status}: ${await campaignsRes.text()}`);
@@ -100,6 +114,11 @@ export class MetaAdsSyncService {
       const insight = insightsByCampaign.get(raw.id);
       const spend = Number(insight?.spend ?? 0);
       const leadsCount = Number(insight?.actions?.find((a) => a.action_type === "lead")?.value ?? 0);
+      const impressions = Math.round(Number(insight?.impressions ?? 0));
+      const clicks = Math.round(Number(insight?.clicks ?? 0));
+      const ctr = Number(insight?.ctr ?? 0); // Meta already returns this as a percentage, not a fraction
+      const avgCpc = Number(insight?.cpc ?? 0);
+      const bidStrategy = formatBidStrategy(raw.bid_strategy);
 
       const existing = await this.prisma.marketingCampaign.findUnique({
         where: { organizationId_metaCampaignId: { organizationId, metaCampaignId: raw.id } },
@@ -113,6 +132,11 @@ export class MetaAdsSyncService {
           status: mapEffectiveStatus(raw.effective_status),
           spend,
           leadsCount,
+          impressions,
+          clicks,
+          ctr,
+          avgCpc,
+          bidStrategy,
           endDate: raw.stop_time ? new Date(raw.stop_time) : null,
         },
         create: {
@@ -123,6 +147,11 @@ export class MetaAdsSyncService {
           status: mapEffectiveStatus(raw.effective_status),
           spend,
           leadsCount,
+          impressions,
+          clicks,
+          ctr,
+          avgCpc,
+          bidStrategy,
           startDate: raw.start_time ? new Date(raw.start_time) : new Date(),
           endDate: raw.stop_time ? new Date(raw.stop_time) : null,
         },

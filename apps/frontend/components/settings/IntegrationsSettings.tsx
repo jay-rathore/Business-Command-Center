@@ -4,8 +4,10 @@ import { useState } from "react";
 import { IntegrationConnectionSummary, IntegrationProvider, RoleName } from "@hpl/shared";
 import { useAuthUser } from "@/lib/auth/AuthUserContext";
 import {
+  isSyncableProvider,
   useIntegrationConnections,
   useSetIntegrationConnectionActive,
+  useTriggerSync,
   useUpsertIntegrationConnection,
 } from "@/lib/query/useIntegrationConnections";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -39,8 +41,10 @@ export function IntegrationsSettings() {
   const connections = useIntegrationConnections(canManage);
   const upsert = useUpsertIntegrationConnection();
   const setActive = useSetIntegrationConnectionActive();
+  const triggerSync = useTriggerSync();
 
   const [editingProvider, setEditingProvider] = useState<IntegrationProvider | null>(null);
+  const [syncMessage, setSyncMessage] = useState<{ provider: IntegrationProvider; text: string } | null>(null);
 
   if (!canManage) return null;
 
@@ -48,6 +52,15 @@ export function IntegrationsSettings() {
 
   function handleSave(provider: IntegrationProvider, credentials: Record<string, string | number | boolean>) {
     upsert.mutate({ provider, credentials }, { onSuccess: () => setEditingProvider(null) });
+  }
+
+  function handleSyncNow(provider: IntegrationProvider) {
+    setSyncMessage(null);
+    triggerSync.mutate(provider, {
+      onSuccess: (result) =>
+        setSyncMessage({ provider, text: `Synced: ${result.processed} processed (${result.created} new, ${result.updated} updated)` }),
+      onError: (error) => setSyncMessage({ provider, text: (error as Error).message }),
+    });
   }
 
   return (
@@ -84,8 +97,22 @@ export function IntegrationsSettings() {
                   <span className="text-text-muted">Last synced {new Date(connection.lastSyncedAt).toLocaleString()}</span>
                 )}
                 {connection?.lastSyncError && <span className="text-critical">{connection.lastSyncError}</span>}
+                {syncMessage?.provider === provider && (
+                  <span className={triggerSync.isError ? "text-critical" : "text-good"}>{syncMessage.text}</span>
+                )}
               </div>
               <div className="flex items-center gap-2">
+                {connection?.isActive && isSyncableProvider(provider) && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={triggerSync.isPending}
+                    onClick={() => handleSyncNow(provider)}
+                  >
+                    {triggerSync.isPending && triggerSync.variables === provider ? "Syncing…" : "Sync now"}
+                  </Button>
+                )}
                 {connection && (
                   <Button
                     type="button"

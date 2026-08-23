@@ -25,11 +25,13 @@ import {
   Bell,
   FileBarChart,
   Settings,
+  Building2,
   X,
   type LucideIcon,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, initials } from "@/lib/utils";
 import { useUiStore } from "@/lib/stores/uiStore";
+import { useAuthUser } from "@/lib/auth/AuthUserContext";
 
 const NAV_ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
@@ -56,6 +58,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const user = useAuthUser();
   const isMobileOpen = useUiStore((s) => s.isMobileSidebarOpen);
   const closeMobile = useUiStore((s) => s.closeMobileSidebar);
 
@@ -78,10 +81,10 @@ export function Sidebar() {
         )}
       >
         <div className="flex h-14 items-center gap-2 border-b border-border px-4">
-          <div className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent text-xs font-bold text-white">
-            HM
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-accent text-xs font-bold text-white">
+            {initials(user.organizationName)}
           </div>
-          <span className="font-display text-sm font-semibold text-text-primary">HPL Maker</span>
+          <span className="truncate font-display text-sm font-semibold text-text-primary">{user.organizationName}</span>
           <button
             type="button"
             onClick={closeMobile}
@@ -123,6 +126,23 @@ export function Sidebar() {
             })}
           </ul>
         </nav>
+
+        {user.isPlatformAdmin && (
+          <div className="border-t border-border px-2 py-3">
+            <Link
+              href="/platform-admin"
+              className={cn(
+                "flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors",
+                pathname.startsWith("/platform-admin")
+                  ? "bg-accent-tint font-medium text-accent-strong"
+                  : "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+              )}
+            >
+              <Building2 className="h-4 w-4 shrink-0" />
+              <span className="flex-1 truncate">Platform Admin</span>
+            </Link>
+          </div>
+        )}
       </aside>
     </>
   );

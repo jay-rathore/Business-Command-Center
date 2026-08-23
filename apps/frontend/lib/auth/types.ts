@@ -8,4 +8,7 @@ export interface AuthUser {
   role: RoleName;
   permissions: string[];
   salesExecutiveId: string | null;
+  isPlatformAdmin: boolean;
+  organizationId: string;
+  organizationName: string;
 }

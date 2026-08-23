@@ -60,7 +60,13 @@ export class AuthController {
     const { tokens, payload } = await this.authService.login(dto.email, dto.password);
     this.setAuthCookies(res, tokens);
     return {
-      user: { id: payload.sub, email: payload.email, role: payload.roleName, permissions: payload.permissions },
+      user: {
+        id: payload.sub,
+        email: payload.email,
+        role: payload.roleName,
+        permissions: payload.permissions,
+        isPlatformAdmin: payload.isPlatformAdmin,
+      },
     };
   }
 
@@ -76,7 +82,13 @@ export class AuthController {
     const { tokens, payload } = await this.authService.refresh(req.user.sub, req.user.refreshToken);
     this.setAuthCookies(res, tokens);
     return {
-      user: { id: payload.sub, email: payload.email, role: payload.roleName, permissions: payload.permissions },
+      user: {
+        id: payload.sub,
+        email: payload.email,
+        role: payload.roleName,
+        permissions: payload.permissions,
+        isPlatformAdmin: payload.isPlatformAdmin,
+      },
     };
   }
 

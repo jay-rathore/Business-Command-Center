@@ -39,7 +39,7 @@ async function bootstrap() {
   });
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('HPL Maker — Business Owner Command Center API')
+    .setTitle('Business Command Center API')
     .setDescription('Phase 1 REST API')
     .setVersion('0.1')
     .addCookieAuth('access_token')

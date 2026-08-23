@@ -10,9 +10,27 @@ import type { GoogleAdsCredentials } from "../../integration-connections/credent
 
 const LIFETIME_FROM_DATE = "2015-01-01"; // arbitrary floor well before any real campaign, mirrors Meta's date_preset=maximum
 
+// The google-ads-api library returns raw GAQL field names (snake_case, not camelCase) and
+// enum fields (like campaign.status) as their raw numeric value, not a string label — confirmed
+// by logging a real response. CampaignStatusEnum.CampaignStatus: 2=ENABLED, 3=PAUSED, 4=REMOVED.
 interface GoogleCampaignRow {
-  campaign: { id: string; name: string; status: string; startDateTime?: string | null; endDateTime?: string | null };
-  metrics: { costMicros?: string | number; conversions?: number };
+  campaign: {
+    id: string;
+    name: string;
+    status: number;
+    start_date_time?: string | null;
+    end_date_time?: string | null;
+    bidding_strategy_type?: number;
+  };
+  campaign_budget?: { amount_micros?: string | number | null } | null;
+  metrics: {
+    cost_micros?: string | number;
+    conversions?: number;
+    impressions?: string | number;
+    clicks?: string | number;
+    average_cpc?: string | number;
+    ctr?: number;
+  };
 }
 
 export interface GoogleAdsSyncResult {
@@ -21,10 +39,52 @@ export interface GoogleAdsSyncResult {
   updated: number;
 }
 
-function mapCampaignStatus(status: string): CampaignStatus {
-  if (status === "ENABLED") return "ACTIVE";
-  if (status === "PAUSED") return "PAUSED";
-  return "ENDED";
+const GOOGLE_CAMPAIGN_STATUS_ENABLED = 2;
+const GOOGLE_CAMPAIGN_STATUS_PAUSED = 3;
+
+function mapCampaignStatus(status: number): CampaignStatus {
+  if (status === GOOGLE_CAMPAIGN_STATUS_ENABLED) return "ACTIVE";
+  if (status === GOOGLE_CAMPAIGN_STATUS_PAUSED) return "PAUSED";
+  return "ENDED"; // REMOVED (4), UNKNOWN (1), or UNSPECIFIED (0)
+}
+
+// BiddingStrategyTypeEnum.BiddingStrategyType — google-ads-api/build/src/protos/autogen/enums.d.ts
+const BIDDING_STRATEGY_LABELS: Record<number, string> = {
+  2: "Enhanced CPC",
+  3: "Manual CPC",
+  4: "Manual CPM",
+  5: "Page One Promoted",
+  6: "Target CPA",
+  7: "Target Outrank Share",
+  8: "Target ROAS",
+  9: "Target Spend",
+  10: "Maximize Conversions",
+  11: "Maximize Conversion Value",
+  12: "Percent CPC",
+  13: "Manual CPV",
+  14: "Target CPM",
+  15: "Target Impression Share",
+  16: "Commission",
+  18: "Manual CPA",
+  19: "Fixed CPM",
+  20: "Target CPV",
+  21: "Target CPC",
+  22: "Fixed Share of Voice",
+};
+
+function mapBiddingStrategy(status: number | undefined): string | null {
+  if (status == null) return null;
+  return BIDDING_STRATEGY_LABELS[status] ?? null; // UNSPECIFIED (0), UNKNOWN (1), INVALID (17) fall through to null
+}
+
+// Google's date_time fields come back as "YYYY-MM-DD HH:mm:ss" (space-separated, no "T" or
+// timezone) — new Date(...) on that literal string parses inconsistently across engines, so
+// normalize to ISO-8601 first.
+function parseGoogleDateTime(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const isoLike = value.includes("T") ? value : value.replace(" ", "T");
+  const parsed = new Date(isoLike);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 /** Pulls real campaign spend + conversion counts from each tenant's own live Google Ads
@@ -68,8 +128,16 @@ export class GoogleAdsSyncService {
 
     const rows = (await customer.report({
       entity: "campaign",
-      attributes: ["campaign.id", "campaign.name", "campaign.status", "campaign.start_date_time", "campaign.end_date_time"],
-      metrics: ["metrics.cost_micros", "metrics.conversions"],
+      attributes: [
+        "campaign.id",
+        "campaign.name",
+        "campaign.status",
+        "campaign.start_date_time",
+        "campaign.end_date_time",
+        "campaign.bidding_strategy_type",
+        "campaign_budget.amount_micros",
+      ],
+      metrics: ["metrics.cost_micros", "metrics.conversions", "metrics.impressions", "metrics.clicks", "metrics.average_cpc", "metrics.ctr"],
       from_date: LIFETIME_FROM_DATE,
       to_date: toDate,
     })) as unknown as GoogleCampaignRow[];
@@ -79,9 +147,16 @@ export class GoogleAdsSyncService {
     let updated = 0;
 
     for (const row of rows) {
-      const spend = Number(row.metrics.costMicros ?? 0) / 1_000_000;
+      const spend = Number(row.metrics.cost_micros ?? 0) / 1_000_000;
       const leadsCount = Math.round(Number(row.metrics.conversions ?? 0));
+      const impressions = Math.round(Number(row.metrics.impressions ?? 0));
+      const clicks = Math.round(Number(row.metrics.clicks ?? 0));
+      const avgCpc = Number(row.metrics.average_cpc ?? 0) / 1_000_000;
+      const ctr = Number(row.metrics.ctr ?? 0) * 100; // API returns a 0-1 fraction, we store a percentage
+      const dailyBudget = row.campaign_budget?.amount_micros != null ? Number(row.campaign_budget.amount_micros) / 1_000_000 : null;
+      const bidStrategy = mapBiddingStrategy(row.campaign.bidding_strategy_type);
       const googleCampaignId = String(row.campaign.id);
+      const endDate = parseGoogleDateTime(row.campaign.end_date_time);
 
       const existing = await this.prisma.marketingCampaign.findUnique({
         where: { organizationId_googleCampaignId: { organizationId, googleCampaignId } },
@@ -95,7 +170,13 @@ export class GoogleAdsSyncService {
           status: mapCampaignStatus(row.campaign.status),
           spend,
           leadsCount,
-          endDate: row.campaign.endDateTime ? new Date(row.campaign.endDateTime) : null,
+          impressions,
+          clicks,
+          ctr,
+          avgCpc,
+          dailyBudget,
+          bidStrategy,
+          endDate,
         },
         create: {
           organizationId,
@@ -105,8 +186,14 @@ export class GoogleAdsSyncService {
           status: mapCampaignStatus(row.campaign.status),
           spend,
           leadsCount,
-          startDate: row.campaign.startDateTime ? new Date(row.campaign.startDateTime) : new Date(),
-          endDate: row.campaign.endDateTime ? new Date(row.campaign.endDateTime) : null,
+          impressions,
+          clicks,
+          ctr,
+          avgCpc,
+          dailyBudget,
+          bidStrategy,
+          startDate: parseGoogleDateTime(row.campaign.start_date_time) ?? new Date(),
+          endDate,
         },
       });
 

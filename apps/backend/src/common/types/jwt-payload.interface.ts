@@ -11,6 +11,7 @@ export interface JwtPayload {
   roleName: RoleName;
   permissions: string[];
   salesExecutiveId: string | null;
+  isPlatformAdmin: boolean;
 }
 
 export type CurrentUserData = JwtPayload;

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { CampaignPlatformBadge } from "./CampaignPlatformBadge";
 import { CampaignStatusBadge } from "./CampaignStatusBadge";
 import { CampaignSourceBadge } from "./CampaignSourceBadge";
-import { formatCurrency, formatNumber } from "@/lib/format";
+import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 
 function formatDate(value: string | null): string {
   return value ? new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -70,6 +70,21 @@ export function CampaignDrawerContent({ data }: { data: CampaignListItem }) {
           <p className="text-xs text-text-muted">
             Revenue ({formatCurrency(campaign.revenue)}) and ROAS are placeholder figures pending real Sales data.
           </p>
+        )}
+
+        {campaign.source === "live" && (
+          <section className="flex flex-col gap-2">
+            <h4 className="text-xs font-medium text-text-muted">Delivery &amp; Bidding</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <Stat label="Impressions" value={formatNumber(campaign.impressions)} />
+              <Stat label="Clicks" value={formatNumber(campaign.clicks)} />
+              <Stat label="CTR" value={formatPercent(campaign.ctr)} />
+              <Stat label="Avg. CPC" value={campaign.avgCpc != null ? formatCurrency(campaign.avgCpc) : "—"} />
+              <Stat label="Conv. Rate" value={formatPercent(campaign.conversionRate)} />
+              <Stat label="Daily Budget" value={campaign.dailyBudget != null ? formatCurrency(campaign.dailyBudget) : "—"} />
+            </div>
+            {campaign.bidStrategy && <Stat label="Bid Strategy" value={campaign.bidStrategy} />}
+          </section>
         )}
 
         {detailQuery.data?.notes && (

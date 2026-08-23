@@ -14,8 +14,8 @@ const publicSans = Public_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "HPL Maker — Business Owner Command Center",
-  description: "Unified business intelligence, CRM, sales, dealer & project platform for HPL Maker.",
+  title: "Business Command Center",
+  description: "Unified business intelligence, CRM, sales, dealer & project platform.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
