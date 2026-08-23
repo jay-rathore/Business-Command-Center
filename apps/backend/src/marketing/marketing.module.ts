@@ -14,6 +14,8 @@ import { CampaignEventService } from './campaign-events/campaign-event.service';
 import { TrafficIntelligenceController } from './traffic-intelligence/traffic-intelligence.controller';
 import { TrafficIntelligenceService } from './traffic-intelligence/traffic-intelligence.service';
 import { RootCauseEngineService } from './traffic-intelligence/root-cause-engine.service';
+import { CampaignRecommendationService } from './traffic-intelligence/campaign-recommendation.service';
+import { ProactiveInsightsService } from './traffic-intelligence/proactive-insights.service';
 import { InvestigationQueryParserService } from './traffic-intelligence/investigation-query-parser.service';
 import {
   RuleBasedTrafficNarrativeComposer,
@@ -44,6 +46,8 @@ import { TRAFFIC_NARRATIVE_COMPOSER } from './traffic-intelligence/traffic-narra
     CampaignEventService,
     TrafficIntelligenceService,
     RootCauseEngineService,
+    CampaignRecommendationService,
+    ProactiveInsightsService,
     InvestigationQueryParserService,
     OpenAiTrafficNarrativeComposer,
     {

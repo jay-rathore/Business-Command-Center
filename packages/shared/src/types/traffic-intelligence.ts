@@ -1,4 +1,4 @@
-import { CampaignPlatform } from '../enums';
+import { CampaignPlatform, InsightType, Priority } from '../enums';
 
 export interface TrafficDayPoint {
   date: string;
@@ -75,6 +75,30 @@ export interface EvidenceItem {
   metricDelta: number | null;
 }
 
+export interface CampaignRecommendationMetrics {
+  conversionRate: number | null;
+  costPerConversion: number | null;
+  roas: number | null;
+  leadsCount: number;
+  ctr: number | null;
+}
+
+export interface CampaignRecommendationCandidate {
+  campaignId: string;
+  campaignName: string;
+  score: number;
+  metrics: CampaignRecommendationMetrics;
+  reasonNotSelected: string | null;
+}
+
+export interface CampaignRecommendationResult {
+  recommended: CampaignRecommendationCandidate | null;
+  alternatives: CampaignRecommendationCandidate[];
+  insufficientDataCampaigns: string[];
+  recommendationText: string;
+  generatedAt: string;
+}
+
 export interface TrafficInvestigationResult {
   supported: boolean;
   intent: InvestigationIntent;
@@ -95,5 +119,19 @@ export interface TrafficInvestigationResult {
     score: number;
     label: 'High' | 'Medium' | 'Low';
   };
+  recommendation?: CampaignRecommendationResult | null;
+  generatedAt: string;
+}
+
+export interface ProactiveInsight {
+  id: string;
+  type: InsightType;
+  priority: Priority;
+  headline: string;
+  whatHappened: string;
+  whyItHappened: string;
+  businessImpact: string;
+  recommendedAction: string;
+  confidence: number;
   generatedAt: string;
 }

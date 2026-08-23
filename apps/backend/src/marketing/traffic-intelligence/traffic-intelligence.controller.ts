@@ -30,4 +30,17 @@ export class TrafficIntelligenceController {
   investigate(@Body() body: InvestigateTrafficDto) {
     return this.trafficIntelligence.investigate(body);
   }
+
+  @Get('proactive-insights')
+  getProactiveInsights() {
+    return this.trafficIntelligence.getProactiveInsights();
+  }
+
+  /** On-demand digest run for testing — the @Cron in ProactiveInsightsService already runs this
+   * daily for every tenant with GA4 connected. Mirrors MetaAdsSyncController's "/run" pattern. */
+  @Post('proactive-insights/run')
+  @RequirePermission('marketing:manage')
+  runProactiveInsightsDigest() {
+    return this.trafficIntelligence.runProactiveInsightsDigest();
+  }
 }

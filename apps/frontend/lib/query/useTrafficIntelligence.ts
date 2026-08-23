@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { InvestigationQuery, TrafficEventDetail, TrafficInvestigationResult, TrafficOverview, TrafficTimelineEvent } from "@hpl/shared";
+import { InvestigationQuery, ProactiveInsight, TrafficEventDetail, TrafficInvestigationResult, TrafficOverview, TrafficTimelineEvent } from "@hpl/shared";
 import { api } from "../api/apiClient";
 
 export interface TrafficDateRange {
@@ -42,5 +42,12 @@ export function useTrafficEventDetail(id: string | null) {
 export function useInvestigateTraffic() {
   return useMutation({
     mutationFn: (query: InvestigationQuery) => api.post<TrafficInvestigationResult>("/api/marketing/traffic-intelligence/investigate", query),
+  });
+}
+
+export function useProactiveInsights() {
+  return useQuery({
+    queryKey: ["marketing", "traffic-intelligence", "proactive-insights"],
+    queryFn: () => api.get<ProactiveInsight[]>("/api/marketing/traffic-intelligence/proactive-insights"),
   });
 }

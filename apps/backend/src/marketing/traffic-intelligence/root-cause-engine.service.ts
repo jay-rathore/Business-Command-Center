@@ -378,7 +378,9 @@ export class RootCauseEngineService {
     };
   }
 
-  private async confirmDayIsAnomaly(
+  /** Public: reused by ProactiveInsightsService's daily digest cron to decide whether a day is
+   * worth writing an AIInsight for, without duplicating the baseline/anomaly query. */
+  async confirmDayIsAnomaly(
     organizationId: string,
     day: Date,
   ): Promise<boolean> {

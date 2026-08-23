@@ -9,7 +9,9 @@ import { PRISMA_EXTENDED_CLIENT } from '../../prisma/prisma-extended.provider';
 import type { ExtendedPrismaClient } from '../../prisma/prisma-extended.provider';
 import { TenantContext } from '../../common/context/tenant-context';
 import {
+  CampaignRecommendationResult,
   InvestigationQuery,
+  ProactiveInsight,
   TrafficChannelEntry,
   TrafficEventDetail,
   TrafficInvestigationResult,
@@ -17,6 +19,11 @@ import {
   TrafficTimelineEvent,
 } from '@hpl/shared';
 import { RootCauseEngineService } from './root-cause-engine.service';
+import { CampaignRecommendationService } from './campaign-recommendation.service';
+import {
+  ProactiveInsightsService,
+  ProactiveInsightsRunResult,
+} from './proactive-insights.service';
 import { InvestigationQueryParserService } from './investigation-query-parser.service';
 import { OpenAiTrafficNarrativeComposer } from './narrative-composer.service';
 import { TRAFFIC_NARRATIVE_COMPOSER } from './traffic-narrative.port';
@@ -40,6 +47,8 @@ export class TrafficIntelligenceService {
     @Inject(PRISMA_EXTENDED_CLIENT)
     private readonly prisma: ExtendedPrismaClient,
     private readonly rootCauseEngine: RootCauseEngineService,
+    private readonly campaignRecommendation: CampaignRecommendationService,
+    private readonly proactiveInsights: ProactiveInsightsService,
     private readonly queryParser: InvestigationQueryParserService,
     private readonly openAiComposer: OpenAiTrafficNarrativeComposer,
     @Inject(TRAFFIC_NARRATIVE_COMPOSER)
@@ -186,6 +195,31 @@ export class TrafficIntelligenceService {
     );
   }
 
+  async getProactiveInsights(limit = 10): Promise<ProactiveInsight[]> {
+    const organizationId = TenantContext.get().organizationId;
+    const rows = await this.prisma.aIInsight.findMany({
+      where: { organizationId, category: 'MARKETING' },
+      orderBy: { generatedAt: 'desc' },
+      take: limit,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      type: r.type,
+      priority: r.priority,
+      headline: r.headline,
+      whatHappened: r.whatHappened,
+      whyItHappened: r.whyItHappened,
+      businessImpact: r.businessImpact,
+      recommendedAction: r.recommendedAction,
+      confidence: r.confidence,
+      generatedAt: r.generatedAt.toISOString(),
+    }));
+  }
+
+  runProactiveInsightsDigest(): Promise<ProactiveInsightsRunResult> {
+    return this.proactiveInsights.runForCurrentTenant();
+  }
+
   async getEventDetail(id: string): Promise<TrafficEventDetail> {
     if (id.startsWith('anomaly:'))
       return this.getAnomalyDetail(id.slice('anomaly:'.length));
@@ -258,7 +292,8 @@ export class TrafficIntelligenceService {
     }
 
     if (intent === 'recommend_campaign') {
-      return this.recommendCampaignPlaceholder();
+      const recommendation = await this.campaignRecommendation.recommend();
+      return this.buildRecommendationResponse(recommendation);
     }
 
     const result = await this.rootCauseEngine.investigate({
@@ -302,12 +337,52 @@ export class TrafficIntelligenceService {
     };
   }
 
-  private recommendCampaignPlaceholder(): TrafficInvestigationResult {
+  /** Maps CampaignRecommendationService's ranked-list result into the shared
+   * TrafficInvestigationResult envelope (see `recommendation` field) so the frontend's one
+   * result card and the /investigate endpoint's one response contract can serve both a
+   * root-cause answer and a recommendation answer. Confidence here means "how clearly the
+   * winner beat the runner-up" (score gap), not "how good the campaign is" — a winner that
+   * barely edged out the alternative is a low-confidence pick even if its own score is high. */
+  private buildRecommendationResponse(
+    recommendation: CampaignRecommendationResult,
+  ): TrafficInvestigationResult {
+    const winner = recommendation.recommended;
+    if (!winner) {
+      return {
+        supported: false,
+        intent: 'recommend_campaign',
+        summary:
+          'No campaign currently has enough click/lead history to confidently recommend one.',
+        trafficChange: {
+          direction: 'flat',
+          percent: null,
+          visitorsBefore: 0,
+          visitorsAfter: 0,
+          comparedWith: '',
+        },
+        primaryCause: null,
+        supportingEvidence: [],
+        contributingFactors: [],
+        notCausedBy: [],
+        recommendedAction:
+          'Let campaigns run longer to accumulate enough clicks/leads, or compare them directly on the Campaigns tab.',
+        confidence: { score: 5, label: 'Low' },
+        recommendation,
+        generatedAt: recommendation.generatedAt,
+      };
+    }
+
+    const gap =
+      recommendation.alternatives.length > 0
+        ? winner.score - recommendation.alternatives[0].score
+        : winner.score;
+    const score = Math.max(5, Math.min(95, Math.round(40 + gap)));
+    const label = score >= 80 ? 'High' : score >= 55 ? 'Medium' : 'Low';
+
     return {
-      supported: false,
+      supported: true,
       intent: 'recommend_campaign',
-      summary:
-        'Campaign recommendations are coming in a follow-up update to Traffic Intelligence.',
+      summary: `"${winner.campaignName}" is the strongest candidate to re-run, based on conversion rate, cost per lead, and lead volume across your campaign history.`,
       trafficChange: {
         direction: 'flat',
         percent: null,
@@ -319,10 +394,10 @@ export class TrafficIntelligenceService {
       supportingEvidence: [],
       contributingFactors: [],
       notCausedBy: [],
-      recommendedAction:
-        'For now, compare campaign performance directly on the Campaigns tab.',
-      confidence: { score: 0, label: 'Low' },
-      generatedAt: new Date().toISOString(),
+      recommendedAction: recommendation.recommendationText,
+      confidence: { score, label },
+      recommendation,
+      generatedAt: recommendation.generatedAt,
     };
   }
 

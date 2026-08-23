@@ -3,6 +3,7 @@
 import { Sparkles } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useTrafficEventDetail } from "@/lib/query/useTrafficIntelligence";
+import { CampaignLink } from "./CampaignLink";
 
 export function EventDetailDialog({ eventId, onClose }: { eventId: string | null; onClose: () => void }) {
   const { data: detail, isLoading } = useTrafficEventDetail(eventId);
@@ -17,6 +18,10 @@ export function EventDetailDialog({ eventId, onClose }: { eventId: string | null
 
         {detail && (
           <div className="flex flex-col gap-4 text-sm">
+            {detail.campaignId && detail.campaignName && (
+              <CampaignLink campaignId={detail.campaignId} campaignName={detail.campaignName} />
+            )}
+
             {detail.field && (
               <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-surface-2 p-3 text-xs">
                 <div>

@@ -10,6 +10,7 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { TrafficTimelineChart } from "./TrafficTimelineChart";
 import { EventDetailDialog } from "./EventDetailDialog";
 import { TrafficAiQueryPanel } from "./TrafficAiQueryPanel";
+import { ProactiveInsightsFeed } from "./ProactiveInsightsFeed";
 
 function deltaLabel(pct: number | null): string | undefined {
   if (pct == null) return undefined;
@@ -34,6 +35,8 @@ export function TrafficIntelligencePanel() {
         <h2 className="font-display text-sm font-semibold text-text-primary">Traffic Intelligence</h2>
         <p className="text-xs text-text-muted">Auto-flagged traffic anomalies, campaign events, and AI root-cause analysis for the last 30 days.</p>
       </div>
+
+      <ProactiveInsightsFeed />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <KpiCard
