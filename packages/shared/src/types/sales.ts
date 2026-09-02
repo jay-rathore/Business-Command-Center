@@ -1,3 +1,5 @@
+import { SalesTargetScope, TargetPeriodType } from '../enums';
+
 export type TrendGranularity = "daily" | "weekly" | "monthly";
 export type BreakdownDimension = "product" | "state" | "dealer" | "executive" | "customer";
 
@@ -34,4 +36,35 @@ export interface SalesTableRow {
   revenue: number;
   growth: number | null;
   contributionPct: number;
+}
+
+export interface SalesTargetItem {
+  id: string;
+  scope: SalesTargetScope;
+  salesExecutiveId: string | null;
+  salesExecutiveName: string | null;
+  dealerId: string | null;
+  dealerName: string | null;
+  productCategoryId: string | null;
+  productCategoryName: string | null;
+  periodType: TargetPeriodType;
+  periodStart: string;
+  periodEnd: string;
+  targetRevenue: number;
+  targetOrders: number | null;
+  achievedRevenue: number;
+  achievedOrders: number | null;
+  achievementPct: number | null;
+}
+
+export interface UpsertSalesTargetRequest {
+  scope: SalesTargetScope;
+  salesExecutiveId?: string;
+  dealerId?: string;
+  productCategoryId?: string;
+  periodType: TargetPeriodType;
+  periodStart: string;
+  periodEnd: string;
+  targetRevenue: number;
+  targetOrders?: number;
 }

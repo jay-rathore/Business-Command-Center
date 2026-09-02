@@ -1,11 +1,13 @@
 import { ComingSoonPage } from "@/components/shared/ComingSoonPage";
 import { CompanyProfilesSettings } from "@/components/settings/CompanyProfilesSettings";
 import { IntegrationsSettings } from "@/components/settings/IntegrationsSettings";
+import { SalesTargetsSettings } from "@/components/settings/SalesTargetsSettings";
 
 export default function SettingsPage() {
   return (
     <div className="flex flex-col gap-6">
       <CompanyProfilesSettings />
+      <SalesTargetsSettings />
       <IntegrationsSettings />
       <ComingSoonPage
         module="Settings & User Management"
