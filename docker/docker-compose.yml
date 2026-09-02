@@ -24,7 +24,7 @@ services:
       target: dev
     env_file: ../.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      NODE_OPTIONS: --max-old-space-size=4096
     ports:
       - "4000:4000"
     depends_on:
@@ -34,6 +34,10 @@ services:
       - ../apps/backend:/app/apps/backend
       - ../packages/shared:/app/packages/shared
       - backend_node_modules:/app/apps/backend/node_modules
+      # apps/backend/.env is written for native dev (DATABASE_URL points at the host-mapped
+      # port) and dotenv loads it with override:true in main.ts, so it always wins over the
+      # bind-mounted directory above — shadow it with the Docker-network variant instead.
+      - ../apps/backend/.env.docker.local:/app/apps/backend/.env:ro
 
   frontend:
     build:
