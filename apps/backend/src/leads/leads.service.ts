@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { NotificationType, PermissionModule, Priority, Prisma, RoleName } from "@prisma/client";
 import {
   BusinessCardDraft,
   DuplicateLeadMatch,
@@ -27,6 +27,7 @@ import { LeadScoringService } from "./lead-scoring.service";
 import { BusinessCardAiParserService } from "./business-card-ai-parser.service";
 import { BusinessCardImageService } from "./business-card-image.service";
 import { LeadCodingService } from "./lead-coding.service";
+import { NotificationsService } from "../notifications/notifications.service";
 
 const BUSINESS_CARD_SOURCE_NAME = "Business Card Scan";
 
@@ -49,6 +50,7 @@ export class LeadsService {
     private readonly cardParser: BusinessCardAiParserService,
     private readonly cardImages: BusinessCardImageService,
     private readonly coding: LeadCodingService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findAll(query: LeadsListQueryDto): Promise<PaginatedResponse<LeadListItem>> {
@@ -274,6 +276,17 @@ export class LeadsService {
       },
     });
     await this.prisma.leadSourceOnLead.create({ data: { organizationId, leadId: lead.id, leadSourceId: source.id } });
+
+    await this.notifications.notify({
+      organizationId,
+      type: NotificationType.NEW_LEAD,
+      priority: Priority.MEDIUM,
+      title: `New lead: ${lead.name}`,
+      message: `${lead.city}, ${lead.state}`,
+      linkModule: PermissionModule.LEADS,
+      linkRecordId: lead.id,
+      targetRole: RoleName.SALES_MANAGER,
+    });
 
     if (dto.saveImage && dto.imageDataUrl) {
       const path = this.cardImages.save(lead.id, dto.imageDataUrl);

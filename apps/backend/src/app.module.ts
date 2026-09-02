@@ -18,6 +18,7 @@ import { QuotationsModule } from './quotations/quotations.module';
 import { CompanyProfilesModule } from './company-profiles/company-profiles.module';
 import { IntegrationConnectionsModule } from './integration-connections/integration-connections.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { WhatsAppModule } from './integrations/whatsapp/whatsapp.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -39,8 +40,9 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
     DealersModule,
     CustomersModule,
     MarketingModule,
-    LeadsModule,
     ProjectsModule,
+    NotificationsModule,
+    LeadsModule,
     DashboardModule,
     WhatsAppModule,
     CompanyProfilesModule,

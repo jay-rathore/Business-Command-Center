@@ -1,11 +1,5 @@
-import { ComingSoonPage } from "@/components/shared/ComingSoonPage";
+import { NotificationsView } from "@/components/shared/NotificationsView";
 
 export default function NotificationsPage() {
-  return (
-    <ComingSoonPage
-      module="Notifications"
-      phase={2}
-      description="Unified alert center covering missed follow-ups, inactive dealers, budget warnings, complaints and warranty claims."
-    />
-  );
+  return <NotificationsView />;
 }

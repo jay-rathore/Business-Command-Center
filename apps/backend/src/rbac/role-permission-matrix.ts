@@ -24,6 +24,7 @@ export const ROLE_PERMISSION_MATRIX: Record<RoleName, RolePermissionSpec[]> = {
     { module: PermissionModule.CUSTOMERS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
     // Sales's own "breakdown by product" view depends on product performance data.
     { module: PermissionModule.PRODUCTS, actions: [PermissionAction.READ] },
+    { module: PermissionModule.NOTIFICATIONS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
   ],
 
   SALES_EXECUTIVE: [
@@ -31,17 +32,20 @@ export const ROLE_PERMISSION_MATRIX: Record<RoleName, RolePermissionSpec[]> = {
     { module: PermissionModule.LEADS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
     { module: PermissionModule.PROJECTS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
     { module: PermissionModule.CUSTOMERS, actions: [PermissionAction.READ] },
+    { module: PermissionModule.NOTIFICATIONS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
   ],
 
   MARKETING_MANAGER: [
     { module: PermissionModule.DASHBOARD, actions: [PermissionAction.READ] },
     { module: PermissionModule.LEADS, actions: [PermissionAction.READ] },
     { module: PermissionModule.MARKETING, actions: [PermissionAction.READ, PermissionAction.WRITE] },
+    { module: PermissionModule.NOTIFICATIONS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
   ],
 
   DEALER_MANAGER: [
     { module: PermissionModule.DASHBOARD, actions: [PermissionAction.READ] },
     { module: PermissionModule.DEALERS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
+    { module: PermissionModule.NOTIFICATIONS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
   ],
 };
 

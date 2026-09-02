@@ -311,7 +311,7 @@ export const NAV_MODULES: NavModule[] = [
   { key: 'products', label: 'Products', route: '/products', phase: 1 },
   { key: 'geography', label: 'Geography', route: '/geography', phase: 3 },
   { key: 'ai-insights', label: 'AI Insights', route: '/ai-insights', phase: 4 },
-  { key: 'notifications', label: 'Notifications', route: '/notifications', phase: 2 },
+  { key: 'notifications', label: 'Notifications', route: '/notifications', phase: 1 },
   { key: 'reports', label: 'Reports', route: '/reports', phase: 3 },
   { key: 'settings', label: 'Settings', route: '/settings', phase: 3 },
 ];

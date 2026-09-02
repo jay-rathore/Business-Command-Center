@@ -2,12 +2,13 @@
 
 import { Suspense } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Bell, ChevronDown, LogOut, Menu } from "lucide-react";
+import { Search, ChevronDown, LogOut, Menu } from "lucide-react";
 import { useAuthUser } from "@/lib/auth/AuthUserContext";
 import { useLogout } from "@/lib/auth/useAuth";
 import { formatRoleName, initials } from "@/lib/utils";
 import { useUiStore } from "@/lib/stores/uiStore";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { NotificationsBell } from "@/components/shared/NotificationsBell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,13 +51,7 @@ export function TopNav() {
         <DateRangePicker />
       </Suspense>
 
-      <button
-        type="button"
-        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        aria-label="Notifications"
-      >
-        <Bell className="h-4.5 w-4.5" />
-      </button>
+      <NotificationsBell />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

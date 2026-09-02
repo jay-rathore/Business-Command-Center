@@ -1,12 +1,17 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Cron, CronExpression } from "@nestjs/schedule";
+import { NotificationType, PermissionModule, Priority, RoleName } from "@prisma/client";
 import { PRISMA_EXTENDED_CLIENT } from "../../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../../prisma/prisma-extended.provider";
 import { TenantContext, resolveDefaultOrganizationId } from "../../common/context/tenant-context";
+import { NotificationsService } from "../../notifications/notifications.service";
 import { computeLeadScore } from "../lead-scoring.util";
 import { classifyStatusName, CRM_STATUS_EXCLUDED_DEPARTMENTS } from "./crm-status-classification";
 import { CrmLeadRaw, CrmLookupRow, mapCrmLead, mapCrmRep } from "./crm-lead-mapper";
+
+// ₹20L — same "high-value" framing AttentionFeedService/NotificationsService use elsewhere.
+const HIGH_VALUE_THRESHOLD = 2000000;
 
 interface CrmLeadListResponse {
   results: CrmLeadRaw[];
@@ -38,6 +43,7 @@ export class CrmSyncService {
   constructor(
     @Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient,
     private readonly config: ConfigService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @Cron(CronExpression.EVERY_30_MINUTES)
@@ -130,11 +136,40 @@ export class CrmSyncService {
     };
 
     const organizationId = TenantContext.get().organizationId;
+    const existed = await this.prisma.lead.findUnique({
+      where: { organizationId_crmId: { organizationId, crmId: mapped.crmId } },
+      select: { id: true },
+    });
     const lead = await this.prisma.lead.upsert({
       where: { organizationId_crmId: { organizationId, crmId: mapped.crmId } },
       update: commonData,
       create: { organizationId, crmId: mapped.crmId, leadCode: mapped.leadCode, createdAt: mapped.createdAt, ...commonData },
     });
+
+    if (!existed) {
+      await this.notifications.notify({
+        organizationId,
+        type: NotificationType.NEW_LEAD,
+        priority: Priority.MEDIUM,
+        title: `New lead: ${lead.name}`,
+        message: `${lead.city}, ${lead.state}`,
+        linkModule: PermissionModule.LEADS,
+        linkRecordId: lead.id,
+        targetRole: RoleName.SALES_MANAGER,
+      });
+      if (mapped.estimatedValue !== null && mapped.estimatedValue >= HIGH_VALUE_THRESHOLD) {
+        await this.notifications.notify({
+          organizationId,
+          type: NotificationType.HIGH_VALUE_LEAD,
+          priority: Priority.HIGH,
+          title: `High-value lead: ${lead.name}`,
+          message: `Estimated value ₹${mapped.estimatedValue.toLocaleString("en-IN")}`,
+          linkModule: PermissionModule.LEADS,
+          linkRecordId: lead.id,
+          targetRole: RoleName.SALES_MANAGER,
+        });
+      }
+    }
 
     // Sources can change between polls — simplest correct approach at this volume is replace-in-full.
     await this.prisma.leadSourceOnLead.deleteMany({ where: { leadId: lead.id } });
