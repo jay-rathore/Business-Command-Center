@@ -10,12 +10,13 @@ import {
   DashboardSummary,
 } from "@hpl/shared";
 import { api } from "../api/apiClient";
+import { appendDateRange, DateRange } from "../dateRange";
 
-export function useDashboardSummary(initialData?: DashboardSummary) {
+export function useDashboardSummary(range: DateRange = {}, initialData?: DashboardSummary) {
   return useQuery({
-    queryKey: ["dashboard", "summary"],
-    queryFn: () => api.get<DashboardSummary>("/api/dashboard/summary"),
-    initialData,
+    queryKey: ["dashboard", "summary", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<DashboardSummary>(appendDateRange("/api/dashboard/summary", range)),
+    initialData: !range.dateFrom && !range.dateTo ? initialData : undefined,
   });
 }
 

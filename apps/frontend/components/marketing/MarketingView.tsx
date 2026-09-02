@@ -6,6 +6,7 @@ import { IndianRupee, Layers, Megaphone, TrendingUp, Users } from "lucide-react"
 import { CampaignListItem, CampaignPlatform, ChannelBreakdownEntry, MarketingKpis, PaginatedResponse } from "@hpl/shared";
 import { useTableState } from "@/hooks/useTableState";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useDateRangeParams } from "@/hooks/useDateRangeParams";
 import { useChannelBreakdown, useMarketingKpis, useMarketingList } from "@/lib/query/useMarketing";
 import { useDrawerStore } from "@/lib/stores/drawerStore";
 import { DataTable } from "@/components/shared/DataTable";
@@ -51,10 +52,12 @@ export function MarketingView({
   const [platformFilter, setPlatformFilter] = useState<CampaignPlatform | undefined>(undefined);
   const debouncedQuery = useDebounce(state.q);
   const openDrawer = useDrawerStore((s) => s.open);
+  const { dateFrom, dateTo } = useDateRangeParams();
+  const range = { dateFrom, dateTo };
 
-  const kpisQuery = useMarketingKpis(initialKpis ?? undefined);
-  const breakdownQuery = useChannelBreakdown(initialBreakdown ?? undefined);
-  const listQuery = useMarketingList({ ...state, q: debouncedQuery, platform: platformFilter }, initialList ?? undefined);
+  const kpisQuery = useMarketingKpis(range, initialKpis ?? undefined);
+  const breakdownQuery = useChannelBreakdown(range, initialBreakdown ?? undefined);
+  const listQuery = useMarketingList({ ...state, q: debouncedQuery, platform: platformFilter, ...range }, initialList ?? undefined);
 
   const kpis = kpisQuery.data;
   const sorting: SortingState = state.sortBy ? [{ id: state.sortBy, desc: state.sortDir === "desc" }] : [];

@@ -6,6 +6,7 @@ import { KpiCard } from "@/components/shared/KpiCard";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTrafficOverview, useTrafficTimeline } from "@/lib/query/useTrafficIntelligence";
+import { useDateRangeParams } from "@/hooks/useDateRangeParams";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { TrafficTimelineChart } from "./TrafficTimelineChart";
 import { EventDetailDialog } from "./EventDetailDialog";
@@ -18,8 +19,9 @@ function deltaLabel(pct: number | null): string | undefined {
 }
 
 export function TrafficIntelligencePanel() {
-  const overviewQuery = useTrafficOverview({});
-  const timelineQuery = useTrafficTimeline({});
+  const { dateFrom, dateTo } = useDateRangeParams();
+  const overviewQuery = useTrafficOverview({ dateFrom, dateTo });
+  const timelineQuery = useTrafficTimeline({ dateFrom, dateTo });
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   const overview = overviewQuery.data;
@@ -33,7 +35,10 @@ export function TrafficIntelligencePanel() {
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="font-display text-sm font-semibold text-text-primary">Traffic Intelligence</h2>
-        <p className="text-xs text-text-muted">Auto-flagged traffic anomalies, campaign events, and AI root-cause analysis for the last 30 days.</p>
+        <p className="text-xs text-text-muted">
+          Auto-flagged traffic anomalies, campaign events, and AI root-cause analysis
+          {dateFrom || dateTo ? " for the selected range." : " for the last 30 days."}
+        </p>
       </div>
 
       <ProactiveInsightsFeed />

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
+import { DateRangeQueryDto } from "../common/dto/date-range-query.dto";
 import { LeadsListQueryDto } from "./dto/leads-list-query.dto";
 import { CreateLeadActivityDto } from "./dto/create-activity.dto";
 import { ScanBusinessCardDto } from "./dto/scan-business-card.dto";
@@ -18,18 +19,18 @@ export class LeadsController {
   }
 
   @Get("kpis")
-  getKpis() {
-    return this.leadsService.getKpis();
+  getKpis(@Query() query: DateRangeQueryDto) {
+    return this.leadsService.getKpis(query.dateFrom, query.dateTo);
   }
 
   @Get("funnel")
-  getFunnel() {
-    return this.leadsService.getFunnel();
+  getFunnel(@Query() query: DateRangeQueryDto) {
+    return this.leadsService.getFunnel(query.dateFrom, query.dateTo);
   }
 
   @Get("sources")
-  getSourceBreakdown() {
-    return this.leadsService.getSourceBreakdown();
+  getSourceBreakdown(@Query() query: DateRangeQueryDto) {
+    return this.leadsService.getSourceBreakdown(query.dateFrom, query.dateTo);
   }
 
   @Get("statuses")

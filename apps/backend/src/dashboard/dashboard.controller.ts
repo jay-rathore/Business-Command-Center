@@ -1,6 +1,7 @@
 import { Controller, Get, Query } from "@nestjs/common";
 import type { ContributorTab } from "@hpl/shared";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
+import { DateRangeQueryDto } from "../common/dto/date-range-query.dto";
 import { DashboardService } from "./dashboard.service";
 import { BusinessHealthService } from "./business-health.service";
 import { AttentionFeedService } from "./attention-feed.service";
@@ -17,8 +18,8 @@ export class DashboardController {
   ) {}
 
   @Get("summary")
-  getSummary() {
-    return this.dashboardService.getSummary();
+  getSummary(@Query() query: DateRangeQueryDto) {
+    return this.dashboardService.getSummary(query.dateFrom, query.dateTo);
   }
 
   @Get("business-health")

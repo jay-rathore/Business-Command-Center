@@ -13,6 +13,7 @@ import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
 import { buildPaginatedResponse } from "../common/utils/paginate";
 import { daysAgo, startOfMonth, startOfMonthsAgo } from "../common/utils/date";
+import { dateRangeWhere, getPreviousEquivalentPeriod, parseDateOnly, endOfDay } from "../common/utils/date-range.util";
 import { SalesTableQueryDto } from "./dto/sales-query.dto";
 import { TenantContext } from "../common/context/tenant-context";
 
@@ -22,19 +23,31 @@ const NOT_CANCELLED: Prisma.OrderWhereInput = { status: { not: OrderStatus.CANCE
 export class SalesService {
   constructor(@Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient) {}
 
-  async getOverview(): Promise<SalesOverview> {
+  async getOverview(dateFrom?: string, dateTo?: string): Promise<SalesOverview> {
     const now = new Date();
-    const periodStart = startOfMonth(now);
-    const previousStart = startOfMonthsAgo(1, now);
+
+    let currentWhere: Prisma.OrderWhereInput;
+    let previousWhere: Prisma.OrderWhereInput;
+    if (dateFrom || dateTo) {
+      const current = { from: dateFrom ? parseDateOnly(dateFrom) : new Date(0), to: dateTo ? parseDateOnly(dateTo) : now };
+      const previous = getPreviousEquivalentPeriod(current);
+      currentWhere = { ...NOT_CANCELLED, orderDate: { gte: current.from, lte: endOfDay(current.to) } };
+      previousWhere = { ...NOT_CANCELLED, orderDate: { gte: previous.from, lte: endOfDay(previous.to) } };
+    } else {
+      const periodStart = startOfMonth(now);
+      const previousStart = startOfMonthsAgo(1, now);
+      currentWhere = { ...NOT_CANCELLED, orderDate: { gte: periodStart } };
+      previousWhere = { ...NOT_CANCELLED, orderDate: { gte: previousStart, lt: periodStart } };
+    }
 
     const [current, previous, target] = await Promise.all([
       this.prisma.order.aggregate({
-        where: { ...NOT_CANCELLED, orderDate: { gte: periodStart } },
+        where: currentWhere,
         _sum: { totalAmount: true },
         _count: { _all: true },
       }),
       this.prisma.order.aggregate({
-        where: { ...NOT_CANCELLED, orderDate: { gte: previousStart, lt: periodStart } },
+        where: previousWhere,
         _sum: { totalAmount: true },
         _count: { _all: true },
       }),
@@ -59,10 +72,11 @@ export class SalesService {
     };
   }
 
-  async getRevenueTrend(granularity: TrendGranularity): Promise<SalesTrendPoint[]> {
+  async getRevenueTrend(granularity: TrendGranularity, dateFrom?: string, dateTo?: string): Promise<SalesTrendPoint[]> {
     const trunc = granularity === "daily" ? "day" : granularity === "weekly" ? "week" : "month";
     const daysBack = granularity === "daily" ? 30 : granularity === "weekly" ? 90 : 365;
-    const startDate = daysAgo(daysBack);
+    const startDate = dateFrom ? parseDateOnly(dateFrom) : daysAgo(daysBack);
+    const endDate = dateTo ? endOfDay(parseDateOnly(dateTo)) : null;
     const organizationId = TenantContext.get().organizationId;
 
     // Raw SQL bypasses the org-scope Prisma extension (same reason "deletedAt IS NULL" is
@@ -74,6 +88,7 @@ export class SalesService {
              COUNT(*) AS orders
       FROM "Order"
       WHERE "orderDate" >= ${startDate}
+        AND (${endDate}::timestamp IS NULL OR "orderDate" <= ${endDate})
         AND "status" != 'CANCELLED'
         AND "deletedAt" IS NULL
         AND "organizationId" = ${organizationId}
@@ -101,24 +116,26 @@ export class SalesService {
     });
   }
 
-  async getBreakdown(by: BreakdownDimension): Promise<BreakdownEntry[]> {
+  async getBreakdown(by: BreakdownDimension, dateFrom?: string, dateTo?: string): Promise<BreakdownEntry[]> {
     switch (by) {
       case "product":
-        return this.breakdownByProduct();
+        return this.breakdownByProduct(dateFrom, dateTo);
       case "state":
-        return this.breakdownByState();
+        return this.breakdownByState(dateFrom, dateTo);
       case "dealer":
-        return this.breakdownByDealer();
+        return this.breakdownByDealer(dateFrom, dateTo);
       case "executive":
-        return this.breakdownByExecutive();
+        return this.breakdownByExecutive(dateFrom, dateTo);
       case "customer":
-        return this.breakdownByCustomer();
+        return this.breakdownByCustomer(dateFrom, dateTo);
     }
   }
 
-  private async breakdownByProduct(): Promise<BreakdownEntry[]> {
+  private async breakdownByProduct(dateFrom?: string, dateTo?: string): Promise<BreakdownEntry[]> {
+    const orderDateFilter = dateRangeWhere("orderDate", dateFrom, dateTo);
     const rows = await this.prisma.orderItem.groupBy({
       by: ["productId"],
+      where: Object.keys(orderDateFilter).length ? { order: { is: orderDateFilter } } : undefined,
       _sum: { lineTotal: true, quantity: true },
       orderBy: { _sum: { lineTotal: "desc" } },
       take: 10,
@@ -132,10 +149,10 @@ export class SalesService {
     }));
   }
 
-  private async breakdownByState(): Promise<BreakdownEntry[]> {
+  private async breakdownByState(dateFrom?: string, dateTo?: string): Promise<BreakdownEntry[]> {
     const rows = await this.prisma.order.groupBy({
       by: ["state"],
-      where: NOT_CANCELLED,
+      where: { ...NOT_CANCELLED, ...dateRangeWhere("orderDate", dateFrom, dateTo) },
       _sum: { totalAmount: true },
       _count: { _all: true },
       orderBy: { _sum: { totalAmount: "desc" } },
@@ -149,10 +166,10 @@ export class SalesService {
     }));
   }
 
-  private async breakdownByDealer(): Promise<BreakdownEntry[]> {
+  private async breakdownByDealer(dateFrom?: string, dateTo?: string): Promise<BreakdownEntry[]> {
     const rows = await this.prisma.order.groupBy({
       by: ["dealerId"],
-      where: { ...NOT_CANCELLED, dealerId: { not: null } },
+      where: { ...NOT_CANCELLED, dealerId: { not: null }, ...dateRangeWhere("orderDate", dateFrom, dateTo) },
       _sum: { totalAmount: true },
       _count: { _all: true },
       orderBy: { _sum: { totalAmount: "desc" } },
@@ -169,10 +186,10 @@ export class SalesService {
     }));
   }
 
-  private async breakdownByExecutive(): Promise<BreakdownEntry[]> {
+  private async breakdownByExecutive(dateFrom?: string, dateTo?: string): Promise<BreakdownEntry[]> {
     const rows = await this.prisma.order.groupBy({
       by: ["salesExecId"],
-      where: { ...NOT_CANCELLED, salesExecId: { not: null } },
+      where: { ...NOT_CANCELLED, salesExecId: { not: null }, ...dateRangeWhere("orderDate", dateFrom, dateTo) },
       _sum: { totalAmount: true },
       _count: { _all: true },
       orderBy: { _sum: { totalAmount: "desc" } },
@@ -189,10 +206,10 @@ export class SalesService {
     }));
   }
 
-  private async breakdownByCustomer(): Promise<BreakdownEntry[]> {
+  private async breakdownByCustomer(dateFrom?: string, dateTo?: string): Promise<BreakdownEntry[]> {
     const rows = await this.prisma.order.groupBy({
       by: ["customerId"],
-      where: { ...NOT_CANCELLED, customerId: { not: null } },
+      where: { ...NOT_CANCELLED, customerId: { not: null }, ...dateRangeWhere("orderDate", dateFrom, dateTo) },
       _sum: { totalAmount: true },
       _count: { _all: true },
       orderBy: { _sum: { totalAmount: "desc" } },

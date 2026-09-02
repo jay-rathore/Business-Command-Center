@@ -6,6 +6,7 @@ import { IndianRupee, MessageSquareWarning, ShieldAlert, ShieldCheck, TrendingUp
 import { CustomerListItem, CustomerSegment, CustomersKpis, PaginatedResponse } from "@hpl/shared";
 import { useTableState } from "@/hooks/useTableState";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useDateRangeParams } from "@/hooks/useDateRangeParams";
 import {
   useCustomersAtRisk,
   useCustomersKpis,
@@ -48,11 +49,13 @@ export function CustomersView({
   const [segmentFilter, setSegmentFilter] = useState<CustomerSegment | undefined>(undefined);
   const debouncedQuery = useDebounce(state.q);
   const openDrawer = useDrawerStore((s) => s.open);
+  const { dateFrom, dateTo } = useDateRangeParams();
+  const range = { dateFrom, dateTo };
 
-  const kpisQuery = useCustomersKpis(initialKpis ?? undefined);
-  const leaderboardQuery = useCustomersLeaderboard();
-  const atRiskQuery = useCustomersAtRisk();
-  const listQuery = useCustomersList({ ...state, q: debouncedQuery, segment: segmentFilter }, initialList ?? undefined);
+  const kpisQuery = useCustomersKpis(range, initialKpis ?? undefined);
+  const leaderboardQuery = useCustomersLeaderboard(range);
+  const atRiskQuery = useCustomersAtRisk(range);
+  const listQuery = useCustomersList({ ...state, q: debouncedQuery, segment: segmentFilter, ...range }, initialList ?? undefined);
 
   const kpis = kpisQuery.data;
   const sorting: SortingState = state.sortBy ? [{ id: state.sortBy, desc: state.sortDir === "desc" }] : [];

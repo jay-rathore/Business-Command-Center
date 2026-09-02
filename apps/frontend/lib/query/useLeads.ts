@@ -16,9 +16,10 @@ import {
   SourceBreakdownEntry,
 } from "@hpl/shared";
 import { api } from "../api/apiClient";
+import { appendDateRange, DateRange } from "../dateRange";
 import { TableState } from "@/hooks/useTableState";
 
-function buildQuery(state: TableState & { statusId?: string }): string {
+function buildQuery(state: TableState & { statusId?: string } & DateRange): string {
   const params = new URLSearchParams();
   params.set("page", String(state.page));
   params.set("pageSize", String(state.pageSize));
@@ -26,38 +27,44 @@ function buildQuery(state: TableState & { statusId?: string }): string {
   params.set("sortDir", state.sortDir);
   if (state.q) params.set("q", state.q);
   if (state.statusId) params.set("statusId", state.statusId);
+  if (state.dateFrom) params.set("dateFrom", state.dateFrom);
+  if (state.dateTo) params.set("dateTo", state.dateTo);
   return params.toString();
 }
 
-export function useLeadsList(state: TableState & { statusId?: string }, initialData?: PaginatedResponse<LeadListItem>) {
+export function useLeadsList(
+  state: TableState & { statusId?: string } & DateRange,
+  initialData?: PaginatedResponse<LeadListItem>,
+) {
   return useQuery({
     queryKey: ["leads", "list", state],
     queryFn: () => api.get<PaginatedResponse<LeadListItem>>(`/api/leads?${buildQuery(state)}`),
     placeholderData: (prev) => prev,
-    initialData: state.page === 1 && !state.sortBy && !state.q && !state.statusId ? initialData : undefined,
+    initialData:
+      state.page === 1 && !state.sortBy && !state.q && !state.statusId && !state.dateFrom && !state.dateTo ? initialData : undefined,
   });
 }
 
-export function useLeadsKpis(initialData?: LeadsKpis) {
+export function useLeadsKpis(range: DateRange = {}, initialData?: LeadsKpis) {
   return useQuery({
-    queryKey: ["leads", "kpis"],
-    queryFn: () => api.get<LeadsKpis>("/api/leads/kpis"),
-    initialData,
+    queryKey: ["leads", "kpis", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<LeadsKpis>(appendDateRange("/api/leads/kpis", range)),
+    initialData: !range.dateFrom && !range.dateTo ? initialData : undefined,
   });
 }
 
-export function useLeadsFunnel(initialData?: FunnelStage[]) {
+export function useLeadsFunnel(range: DateRange = {}, initialData?: FunnelStage[]) {
   return useQuery({
-    queryKey: ["leads", "funnel"],
-    queryFn: () => api.get<FunnelStage[]>("/api/leads/funnel"),
-    initialData,
+    queryKey: ["leads", "funnel", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<FunnelStage[]>(appendDateRange("/api/leads/funnel", range)),
+    initialData: !range.dateFrom && !range.dateTo ? initialData : undefined,
   });
 }
 
-export function useLeadsSources() {
+export function useLeadsSources(range: DateRange = {}) {
   return useQuery({
-    queryKey: ["leads", "sources"],
-    queryFn: () => api.get<SourceBreakdownEntry[]>("/api/leads/sources"),
+    queryKey: ["leads", "sources", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<SourceBreakdownEntry[]>(appendDateRange("/api/leads/sources", range)),
   });
 }
 

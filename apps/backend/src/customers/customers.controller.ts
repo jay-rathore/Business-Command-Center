@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
+import { DateRangeQueryDto } from "../common/dto/date-range-query.dto";
 import { CustomersListQueryDto } from "./dto/customers-list-query.dto";
 import { CustomersService } from "./customers.service";
 
@@ -14,18 +15,18 @@ export class CustomersController {
   }
 
   @Get("kpis")
-  getKpis() {
-    return this.customersService.getKpis();
+  getKpis(@Query() query: DateRangeQueryDto) {
+    return this.customersService.getKpis(query.dateFrom, query.dateTo);
   }
 
   @Get("leaderboard")
-  getLeaderboard() {
-    return this.customersService.getLeaderboard();
+  getLeaderboard(@Query() query: DateRangeQueryDto) {
+    return this.customersService.getLeaderboard(query.dateFrom, query.dateTo);
   }
 
   @Get("at-risk")
-  getAtRisk() {
-    return this.customersService.getAtRisk();
+  getAtRisk(@Query() query: DateRangeQueryDto) {
+    return this.customersService.getAtRisk(query.dateFrom, query.dateTo);
   }
 
   @Get(":id")

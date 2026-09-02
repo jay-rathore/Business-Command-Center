@@ -12,6 +12,7 @@ import {
 } from "@hpl/shared";
 import { useAiSummary, useAttentionFeed, useBusinessHealth, useContributors, useDashboardSummary } from "@/lib/query/useDashboard";
 import { useSalesRevenueTrend } from "@/lib/query/useSales";
+import { useDateRangeParams } from "@/hooks/useDateRangeParams";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { RevenueTrendChart } from "@/components/shared/RevenueTrendChart";
 import { AttentionFeed } from "@/components/shared/AttentionFeed";
@@ -46,9 +47,10 @@ export function DashboardView({
 }) {
   const router = useRouter();
   const [contributorTab, setContributorTab] = useState<ContributorTab>("dealers");
+  const { dateFrom, dateTo } = useDateRangeParams();
 
-  const summaryQuery = useDashboardSummary(initialSummary ?? undefined);
-  const trendQuery = useSalesRevenueTrend("monthly");
+  const summaryQuery = useDashboardSummary({ dateFrom, dateTo }, initialSummary ?? undefined);
+  const trendQuery = useSalesRevenueTrend("monthly", { dateFrom, dateTo });
   const healthQuery = useBusinessHealth(initialHealth ?? undefined);
   const attentionQuery = useAttentionFeed(initialAttention ?? undefined);
   const contributorsQuery = useContributors(contributorTab);
@@ -80,11 +82,11 @@ export function DashboardView({
       {/* Hero: Revenue + Target Achievement */}
       <div className="grid grid-cols-1 gap-4 rounded-md border border-border bg-linear-to-br from-accent-tint to-surface p-6 md:grid-cols-2">
         <div className="flex flex-col justify-center gap-2">
-          <span className="text-xs font-medium text-text-muted">Revenue this month</span>
+          <span className="text-xs font-medium text-text-muted">{dateFrom || dateTo ? "Revenue in selected range" : "Revenue this month"}</span>
           <span className="font-display text-4xl font-semibold text-text-primary">{s ? formatCurrency(s.revenue.value) : "—"}</span>
           {s?.revenue.delta != null && (
             <span className={cn("text-sm font-medium", s.revenue.delta >= 0 ? "text-good" : "text-critical")}>
-              {formatPercent(s.revenue.delta, { signed: true })} vs previous month
+              {formatPercent(s.revenue.delta, { signed: true })} {dateFrom || dateTo ? "vs previous period" : "vs previous month"}
             </span>
           )}
         </div>

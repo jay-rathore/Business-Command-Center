@@ -1,4 +1,4 @@
-import { IsIn, IsOptional } from "class-validator";
+import { IsDateString, IsIn, IsOptional } from "class-validator";
 import { CampaignPlatform, CampaignStatus } from "@prisma/client";
 import { ListQueryDto } from "../../common/dto/list-query.dto";
 
@@ -14,4 +14,12 @@ export class MarketingListQueryDto extends ListQueryDto {
   @IsOptional()
   @IsIn(["name", "spend", "leadsCount", "startDate", "createdAt"])
   declare sortBy?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 }

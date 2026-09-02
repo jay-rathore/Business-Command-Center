@@ -5,6 +5,7 @@ import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
 import { buildPaginatedResponse } from "../common/utils/paginate";
 import { startOfMonth } from "../common/utils/date";
+import { dateRangeWhere } from "../common/utils/date-range.util";
 import { CustomersListQueryDto, isCustomerComputedSortKey } from "./dto/customers-list-query.dto";
 import { CustomerMetricsService } from "./customer-metrics.service";
 import { deriveCustomerSegment } from "./customer-segment";
@@ -25,7 +26,7 @@ export class CustomersService {
   ) {}
 
   async findAll(query: CustomersListQueryDto): Promise<PaginatedResponse<CustomerListItem>> {
-    const { page, pageSize, sortBy, sortDir, q, segment, type, state } = query;
+    const { page, pageSize, sortBy, sortDir, q, segment, type, state, dateFrom, dateTo } = query;
 
     const where: Prisma.CustomerWhereInput = {
       ...(type ? { type } : {}),
@@ -40,6 +41,7 @@ export class CustomersService {
             ],
           }
         : {}),
+      ...dateRangeWhere("createdAt", dateFrom, dateTo),
     };
 
     if (segment || isCustomerComputedSortKey(sortBy)) {
@@ -118,8 +120,9 @@ export class CustomersService {
     };
   }
 
-  async getKpis(): Promise<CustomersKpis> {
+  async getKpis(dateFrom?: string, dateTo?: string): Promise<CustomersKpis> {
     const all = await this.prisma.customer.findMany({
+      where: dateRangeWhere("createdAt", dateFrom, dateTo),
       select: { id: true, lifetimeValue: true, lastPurchaseAt: true, firstPurchaseAt: true, createdAt: true },
     });
 
@@ -127,19 +130,19 @@ export class CustomersService {
     let activeCustomers = 0;
     let atRiskCustomers = 0;
     let dormantCustomers = 0;
-    const monthStart = startOfMonth(new Date());
-    let newThisMonth = 0;
 
     for (const c of all) {
       totalLifetimeValue += Number(c.lifetimeValue);
-      if (c.createdAt >= monthStart) newThisMonth += 1;
       const segment = deriveCustomerSegment(c.lastPurchaseAt, c.firstPurchaseAt, c.createdAt);
       if (segment === "ACTIVE") activeCustomers += 1;
       else if (segment === "AT_RISK") atRiskCustomers += 1;
       else if (segment === "DORMANT") dormantCustomers += 1;
     }
 
-    const [openComplaints, activeWarrantyClaims] = await Promise.all([
+    // newThisMonth always reflects the current calendar month, independent of the selected range.
+    const monthStart = startOfMonth(new Date());
+    const [newThisMonth, openComplaints, activeWarrantyClaims] = await Promise.all([
+      this.prisma.customer.count({ where: { createdAt: { gte: monthStart } } }),
       this.prisma.complaint.count({ where: OPEN_COMPLAINT }),
       this.prisma.warrantyClaim.count({ where: ACTIVE_WARRANTY_CLAIM }),
     ]);
@@ -157,8 +160,12 @@ export class CustomersService {
     };
   }
 
-  async getLeaderboard(): Promise<CustomerLeaderboardEntry[]> {
-    const customers = await this.prisma.customer.findMany({ orderBy: { lifetimeValue: "desc" }, take: 5 });
+  async getLeaderboard(dateFrom?: string, dateTo?: string): Promise<CustomerLeaderboardEntry[]> {
+    const customers = await this.prisma.customer.findMany({
+      where: dateRangeWhere("createdAt", dateFrom, dateTo),
+      orderBy: { lifetimeValue: "desc" },
+      take: 5,
+    });
     const counts = await this.getOrderCounts(customers.map((c) => c.id));
     return customers.map((c) => ({
       id: c.id,
@@ -169,8 +176,8 @@ export class CustomersService {
     }));
   }
 
-  async getAtRisk(): Promise<CustomerListItem[]> {
-    const all = await this.prisma.customer.findMany();
+  async getAtRisk(dateFrom?: string, dateTo?: string): Promise<CustomerListItem[]> {
+    const all = await this.prisma.customer.findMany({ where: dateRangeWhere("createdAt", dateFrom, dateTo) });
     const counts = await this.getOrderCounts(all.map((c) => c.id));
     return all
       .map((c) => this.toListItem(c, counts.get(c.id) ?? 0))

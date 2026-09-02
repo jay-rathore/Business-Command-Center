@@ -11,28 +11,29 @@ import {
   TrendGranularity,
 } from "@hpl/shared";
 import { api } from "../api/apiClient";
+import { appendDateRange, DateRange } from "../dateRange";
 import { TableState } from "@/hooks/useTableState";
 
-export function useSalesOverview(initialData?: SalesOverview) {
+export function useSalesOverview(range: DateRange = {}, initialData?: SalesOverview) {
   return useQuery({
-    queryKey: ["sales", "overview"],
-    queryFn: () => api.get<SalesOverview>("/api/sales/overview"),
-    initialData,
+    queryKey: ["sales", "overview", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<SalesOverview>(appendDateRange("/api/sales/overview", range)),
+    initialData: !range.dateFrom && !range.dateTo ? initialData : undefined,
   });
 }
 
-export function useSalesRevenueTrend(granularity: TrendGranularity, initialData?: SalesTrendPoint[]) {
+export function useSalesRevenueTrend(granularity: TrendGranularity, range: DateRange = {}, initialData?: SalesTrendPoint[]) {
   return useQuery({
-    queryKey: ["sales", "revenue-trend", granularity],
-    queryFn: () => api.get<SalesTrendPoint[]>(`/api/sales/revenue-trend?granularity=${granularity}`),
-    initialData: granularity === "monthly" ? initialData : undefined,
+    queryKey: ["sales", "revenue-trend", granularity, range.dateFrom, range.dateTo],
+    queryFn: () => api.get<SalesTrendPoint[]>(appendDateRange(`/api/sales/revenue-trend?granularity=${granularity}`, range)),
+    initialData: granularity === "monthly" && !range.dateFrom && !range.dateTo ? initialData : undefined,
   });
 }
 
-export function useSalesBreakdown(by: BreakdownDimension) {
+export function useSalesBreakdown(by: BreakdownDimension, range: DateRange = {}) {
   return useQuery({
-    queryKey: ["sales", "breakdown", by],
-    queryFn: () => api.get<BreakdownEntry[]>(`/api/sales/breakdown?by=${by}`),
+    queryKey: ["sales", "breakdown", by, range.dateFrom, range.dateTo],
+    queryFn: () => api.get<BreakdownEntry[]>(appendDateRange(`/api/sales/breakdown?by=${by}`, range)),
   });
 }
 

@@ -6,6 +6,7 @@ import { IndianRupee, ShoppingCart, Target, TrendingDown, TrendingUp, Wallet } f
 import { BreakdownDimension, SalesOverview, SalesTableRow, SalesTrendPoint, TrendGranularity } from "@hpl/shared";
 import { useTableState } from "@/hooks/useTableState";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useDateRangeParams } from "@/hooks/useDateRangeParams";
 import { useSalesBreakdown, useSalesOverview, useSalesRevenueTrend, useSalesTable } from "@/lib/query/useSales";
 import { DataTable } from "@/components/shared/DataTable";
 import { KpiCard } from "@/components/shared/KpiCard";
@@ -41,10 +42,12 @@ export function SalesView({
   const [breakdownTab, setBreakdownTab] = useState<BreakdownDimension>("product");
   const { state, setPage, setSort, setQuery } = useTableState({ pageSize: 10, sortBy: "revenue" });
   const debouncedQuery = useDebounce(state.q);
+  const { dateFrom, dateTo } = useDateRangeParams();
+  const range = { dateFrom, dateTo };
 
-  const overviewQuery = useSalesOverview(initialOverview ?? undefined);
-  const trendQuery = useSalesRevenueTrend(granularity, initialTrend ?? undefined);
-  const breakdownQuery = useSalesBreakdown(breakdownTab);
+  const overviewQuery = useSalesOverview(range, initialOverview ?? undefined);
+  const trendQuery = useSalesRevenueTrend(granularity, range, initialTrend ?? undefined);
+  const breakdownQuery = useSalesBreakdown(breakdownTab, range);
   const tableQuery = useSalesTable({ ...state, q: debouncedQuery });
 
   const overview = overviewQuery.data;
@@ -79,7 +82,9 @@ export function SalesView({
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="font-display text-xl font-semibold text-text-primary">Sales</h1>
-        <p className="text-sm text-text-muted">Revenue, orders, and performance for the current month</p>
+        <p className="text-sm text-text-muted">
+          Revenue, orders, and performance {dateFrom || dateTo ? "for the selected range" : "for the current month"}
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
@@ -100,7 +105,7 @@ export function SalesView({
           value={overview ? formatPercent(overview.growth, { signed: true }) : "—"}
           icon={overview?.growth != null && overview.growth < 0 ? TrendingDown : TrendingUp}
           deltaTone={overview?.growth == null ? "neutral" : overview.growth >= 0 ? "good" : "critical"}
-          sub="vs previous month"
+          sub={dateFrom || dateTo ? "vs previous period" : "vs previous month"}
         />
       </div>
 

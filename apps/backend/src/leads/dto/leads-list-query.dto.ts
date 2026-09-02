@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsString } from "class-validator";
 import { ListQueryDto } from "../../common/dto/list-query.dto";
 
 export class LeadsListQueryDto extends ListQueryDto {
@@ -12,4 +12,12 @@ export class LeadsListQueryDto extends ListQueryDto {
   @IsOptional()
   @IsIn(["name", "company", "createdAt", "nextFollowUpAt", "score", "estimatedValue"])
   declare sortBy?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 }

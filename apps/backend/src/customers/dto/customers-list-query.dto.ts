@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsString } from "class-validator";
 import { CustomerType } from "@prisma/client";
 import type { CustomerSegment } from "@hpl/shared";
 import { ListQueryDto } from "../../common/dto/list-query.dto";
@@ -23,6 +23,14 @@ export class CustomersListQueryDto extends ListQueryDto {
   @IsOptional()
   @IsIn(["name", "city", "state", "lifetimeValue", "lastPurchaseAt", "createdAt", ...COMPUTED_SORT_KEYS])
   declare sortBy?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 }
 
 export function isCustomerComputedSortKey(key: string | undefined): key is CustomerComputedSortKey {

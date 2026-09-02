@@ -4,6 +4,7 @@ import { CampaignDetail, CampaignListItem, ChannelBreakdownEntry, MarketingKpis,
 import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
 import { buildPaginatedResponse } from "../common/utils/paginate";
+import { dateRangeWhere } from "../common/utils/date-range.util";
 import { MarketingListQueryDto } from "./dto/marketing-list-query.dto";
 
 type CampaignRow = Prisma.MarketingCampaignGetPayload<{}>;
@@ -15,12 +16,13 @@ export class MarketingService {
   constructor(@Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient) {}
 
   async findAll(query: MarketingListQueryDto): Promise<PaginatedResponse<CampaignListItem>> {
-    const { page, pageSize, sortBy, sortDir, q, platform, status } = query;
+    const { page, pageSize, sortBy, sortDir, q, platform, status, dateFrom, dateTo } = query;
 
     const where: Prisma.MarketingCampaignWhereInput = {
       ...(platform ? { platform } : {}),
       ...(status ? { status } : {}),
       ...(q ? { name: { contains: q, mode: "insensitive" as const } } : {}),
+      ...dateRangeWhere("startDate", dateFrom, dateTo),
     };
 
     const [campaigns, total] = await Promise.all([
@@ -42,8 +44,8 @@ export class MarketingService {
     return { ...this.toListItem(campaign), notes: campaign.notes };
   }
 
-  async getKpis(): Promise<MarketingKpis> {
-    const campaigns = await this.prisma.marketingCampaign.findMany();
+  async getKpis(dateFrom?: string, dateTo?: string): Promise<MarketingKpis> {
+    const campaigns = await this.prisma.marketingCampaign.findMany({ where: dateRangeWhere("startDate", dateFrom, dateTo) });
 
     let totalSpend = 0;
     let totalLeads = 0;
@@ -77,8 +79,8 @@ export class MarketingService {
     };
   }
 
-  async getChannelBreakdown(): Promise<ChannelBreakdownEntry[]> {
-    const campaigns = await this.prisma.marketingCampaign.findMany();
+  async getChannelBreakdown(dateFrom?: string, dateTo?: string): Promise<ChannelBreakdownEntry[]> {
+    const campaigns = await this.prisma.marketingCampaign.findMany({ where: dateRangeWhere("startDate", dateFrom, dateTo) });
     const byPlatform = new Map<CampaignPlatform, ChannelBreakdownEntry>();
     for (const platform of ALL_PLATFORMS) byPlatform.set(platform, { platform, spend: 0, leadsCount: 0, campaignCount: 0 });
 

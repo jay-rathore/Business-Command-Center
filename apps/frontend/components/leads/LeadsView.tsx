@@ -6,6 +6,7 @@ import { CheckCircle2, TrendingUp, UserPlus, Users, XCircle } from "lucide-react
 import { FunnelStage, LeadListItem, LeadsKpis, PaginatedResponse } from "@hpl/shared";
 import { useTableState } from "@/hooks/useTableState";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useDateRangeParams } from "@/hooks/useDateRangeParams";
 import { useLeadStatuses, useLeadsFunnel, useLeadsKpis, useLeadsList, useLeadsSources } from "@/lib/query/useLeads";
 import { useDrawerStore } from "@/lib/stores/drawerStore";
 import { DataTable } from "@/components/shared/DataTable";
@@ -30,12 +31,14 @@ export function LeadsView({
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const debouncedQuery = useDebounce(state.q);
   const openDrawer = useDrawerStore((s) => s.open);
+  const { dateFrom, dateTo } = useDateRangeParams();
+  const range = { dateFrom, dateTo };
 
-  const kpisQuery = useLeadsKpis(initialKpis ?? undefined);
-  const funnelQuery = useLeadsFunnel(initialFunnel ?? undefined);
-  const sourcesQuery = useLeadsSources();
+  const kpisQuery = useLeadsKpis(range, initialKpis ?? undefined);
+  const funnelQuery = useLeadsFunnel(range, initialFunnel ?? undefined);
+  const sourcesQuery = useLeadsSources(range);
   const statusesQuery = useLeadStatuses();
-  const listQuery = useLeadsList({ ...state, q: debouncedQuery, statusId: statusFilter }, initialList ?? undefined);
+  const listQuery = useLeadsList({ ...state, q: debouncedQuery, statusId: statusFilter, ...range }, initialList ?? undefined);
 
   const kpis = kpisQuery.data;
   const sorting: SortingState = state.sortBy ? [{ id: state.sortBy, desc: state.sortDir === "desc" }] : [];

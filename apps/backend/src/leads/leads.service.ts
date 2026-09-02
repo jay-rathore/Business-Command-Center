@@ -18,6 +18,7 @@ import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
 import { TenantContext } from "../common/context/tenant-context";
 import { buildPaginatedResponse } from "../common/utils/paginate";
 import { startOfMonth } from "../common/utils/date";
+import { dateRangeWhere } from "../common/utils/date-range.util";
 import { LeadsListQueryDto } from "./dto/leads-list-query.dto";
 import { CreateLeadActivityDto } from "./dto/create-activity.dto";
 import { ScanBusinessCardDto } from "./dto/scan-business-card.dto";
@@ -51,7 +52,7 @@ export class LeadsService {
   ) {}
 
   async findAll(query: LeadsListQueryDto): Promise<PaginatedResponse<LeadListItem>> {
-    const { page, pageSize, sortBy, sortDir, q, statusId } = query;
+    const { page, pageSize, sortBy, sortDir, q, statusId, dateFrom, dateTo } = query;
 
     const where: Prisma.LeadWhereInput = {
       ...(statusId ? { statusId } : {}),
@@ -64,6 +65,7 @@ export class LeadsService {
             ],
           }
         : {}),
+      ...dateRangeWhere("createdAt", dateFrom, dateTo),
     };
 
     const [leads, total] = await Promise.all([
@@ -116,16 +118,17 @@ export class LeadsService {
     });
   }
 
-  async getKpis(): Promise<LeadsKpis> {
+  async getKpis(dateFrom?: string, dateTo?: string): Promise<LeadsKpis> {
     const now = new Date();
     const monthStart = startOfMonth(now);
+    const range = dateRangeWhere("createdAt", dateFrom, dateTo);
 
     const [total, newThisMonth, qualified, won, lost] = await Promise.all([
-      this.prisma.lead.count(),
+      this.prisma.lead.count({ where: range }),
       this.prisma.lead.count({ where: { createdAt: { gte: monthStart } } }),
-      this.prisma.lead.count({ where: { status: { name: { equals: "Qualified", mode: "insensitive" } } } }),
-      this.prisma.lead.count({ where: { status: { stage: "WON" } } }),
-      this.prisma.lead.count({ where: { status: { stage: "LOST" } } }),
+      this.prisma.lead.count({ where: { ...range, status: { name: { equals: "Qualified", mode: "insensitive" } } } }),
+      this.prisma.lead.count({ where: { ...range, status: { stage: "WON" } } }),
+      this.prisma.lead.count({ where: { ...range, status: { stage: "LOST" } } }),
     ]);
 
     const pending = total - won - lost;
@@ -142,7 +145,7 @@ export class LeadsService {
     };
   }
 
-  async getFunnel(): Promise<FunnelStage[]> {
+  async getFunnel(dateFrom?: string, dateTo?: string): Promise<FunnelStage[]> {
     const statuses = await this.prisma.leadStatus.findMany({
       where: { stage: { in: ["OPEN", "WON"] } },
       orderBy: { sortOrder: "asc" },
@@ -150,7 +153,7 @@ export class LeadsService {
 
     const counts = await this.prisma.lead.groupBy({
       by: ["statusId"],
-      where: { statusId: { in: statuses.map((s) => s.id) } },
+      where: { statusId: { in: statuses.map((s) => s.id) }, ...dateRangeWhere("createdAt", dateFrom, dateTo) },
       _count: { _all: true },
     });
     const countByStatusId = new Map(counts.map((c) => [c.statusId, c._count._all]));
@@ -163,9 +166,11 @@ export class LeadsService {
     }));
   }
 
-  async getSourceBreakdown(): Promise<SourceBreakdownEntry[]> {
+  async getSourceBreakdown(dateFrom?: string, dateTo?: string): Promise<SourceBreakdownEntry[]> {
+    const leadDateFilter = dateRangeWhere("createdAt", dateFrom, dateTo);
     const rows = await this.prisma.leadSourceOnLead.groupBy({
       by: ["leadSourceId"],
+      where: Object.keys(leadDateFilter).length ? { lead: { is: leadDateFilter } } : undefined,
       _count: { _all: true },
     });
     const sources = await this.prisma.leadSource.findMany({

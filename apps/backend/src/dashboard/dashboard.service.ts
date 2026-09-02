@@ -21,10 +21,10 @@ export class DashboardService {
     @Inject(INSIGHT_GENERATOR) private readonly insightGenerator: InsightGeneratorPort,
   ) {}
 
-  async getSummary(): Promise<DashboardSummary> {
+  async getSummary(dateFrom?: string, dateTo?: string): Promise<DashboardSummary> {
     const [salesOverview, leadsKpis, projectsKpis] = await Promise.all([
-      this.sales.getOverview(),
-      this.leads.getKpis(),
+      this.sales.getOverview(dateFrom, dateTo),
+      this.leads.getKpis(dateFrom, dateTo),
       this.projects.getKpis(),
     ]);
 

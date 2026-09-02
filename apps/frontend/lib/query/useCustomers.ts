@@ -10,9 +10,10 @@ import {
   PaginatedResponse,
 } from "@hpl/shared";
 import { api } from "../api/apiClient";
+import { appendDateRange, DateRange } from "../dateRange";
 import { TableState } from "@/hooks/useTableState";
 
-function buildQuery(state: TableState & { segment?: CustomerSegment }): string {
+function buildQuery(state: TableState & { segment?: CustomerSegment } & DateRange): string {
   const params = new URLSearchParams();
   params.set("page", String(state.page));
   params.set("pageSize", String(state.pageSize));
@@ -20,40 +21,43 @@ function buildQuery(state: TableState & { segment?: CustomerSegment }): string {
   params.set("sortDir", state.sortDir);
   if (state.q) params.set("q", state.q);
   if (state.segment) params.set("segment", state.segment);
+  if (state.dateFrom) params.set("dateFrom", state.dateFrom);
+  if (state.dateTo) params.set("dateTo", state.dateTo);
   return params.toString();
 }
 
 export function useCustomersList(
-  state: TableState & { segment?: CustomerSegment },
+  state: TableState & { segment?: CustomerSegment } & DateRange,
   initialData?: PaginatedResponse<CustomerListItem>,
 ) {
   return useQuery({
     queryKey: ["customers", "list", state],
     queryFn: () => api.get<PaginatedResponse<CustomerListItem>>(`/api/customers?${buildQuery(state)}`),
     placeholderData: (prev) => prev,
-    initialData: state.page === 1 && !state.sortBy && !state.q && !state.segment ? initialData : undefined,
+    initialData:
+      state.page === 1 && !state.sortBy && !state.q && !state.segment && !state.dateFrom && !state.dateTo ? initialData : undefined,
   });
 }
 
-export function useCustomersKpis(initialData?: CustomersKpis) {
+export function useCustomersKpis(range: DateRange = {}, initialData?: CustomersKpis) {
   return useQuery({
-    queryKey: ["customers", "kpis"],
-    queryFn: () => api.get<CustomersKpis>("/api/customers/kpis"),
-    initialData,
+    queryKey: ["customers", "kpis", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<CustomersKpis>(appendDateRange("/api/customers/kpis", range)),
+    initialData: !range.dateFrom && !range.dateTo ? initialData : undefined,
   });
 }
 
-export function useCustomersLeaderboard() {
+export function useCustomersLeaderboard(range: DateRange = {}) {
   return useQuery({
-    queryKey: ["customers", "leaderboard"],
-    queryFn: () => api.get<CustomerLeaderboardEntry[]>("/api/customers/leaderboard"),
+    queryKey: ["customers", "leaderboard", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<CustomerLeaderboardEntry[]>(appendDateRange("/api/customers/leaderboard", range)),
   });
 }
 
-export function useCustomersAtRisk() {
+export function useCustomersAtRisk(range: DateRange = {}) {
   return useQuery({
-    queryKey: ["customers", "at-risk"],
-    queryFn: () => api.get<CustomerListItem[]>("/api/customers/at-risk"),
+    queryKey: ["customers", "at-risk", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<CustomerListItem[]>(appendDateRange("/api/customers/at-risk", range)),
   });
 }
 

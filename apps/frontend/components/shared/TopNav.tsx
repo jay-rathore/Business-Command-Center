@@ -1,11 +1,13 @@
 "use client";
 
+import { Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Bell, ChevronDown, LogOut, Menu } from "lucide-react";
 import { useAuthUser } from "@/lib/auth/AuthUserContext";
 import { useLogout } from "@/lib/auth/useAuth";
 import { formatRoleName, initials } from "@/lib/utils";
 import { useUiStore } from "@/lib/stores/uiStore";
+import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +45,10 @@ export function TopNav() {
         <span className="hidden truncate sm:inline">Search leads, dealers, projects, orders…</span>
         <span className="truncate sm:hidden">Search…</span>
       </div>
+
+      <Suspense fallback={null}>
+        <DateRangePicker />
+      </Suspense>
 
       <button
         type="button"
