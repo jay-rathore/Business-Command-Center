@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsString } from "class-validator";
 import { DealerStatus } from "@prisma/client";
 import { ListQueryDto } from "../../common/dto/list-query.dto";
 
@@ -17,6 +17,14 @@ export class DealersListQueryDto extends ListQueryDto {
   @IsOptional()
   @IsIn(["name", "dealerCode", "state", "joinedAt", ...COMPUTED_SORT_KEYS])
   declare sortBy?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 }
 
 export function isDealerComputedSortKey(key: string | undefined): key is DealerComputedSortKey {

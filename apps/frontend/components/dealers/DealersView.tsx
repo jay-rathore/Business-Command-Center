@@ -6,6 +6,7 @@ import { Activity, IndianRupee, ShieldAlert, Store, TrendingUp, UserCheck, UserP
 import { DealerListItem, DealersKpis, DealerStatus, PaginatedResponse } from "@hpl/shared";
 import { useTableState } from "@/hooks/useTableState";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useDateRangeParams } from "@/hooks/useDateRangeParams";
 import {
   useDealersKpis,
   useDealersLeaderboard,
@@ -42,11 +43,13 @@ export function DealersView({
   const [statusFilter, setStatusFilter] = useState<DealerStatus | undefined>(undefined);
   const debouncedQuery = useDebounce(state.q);
   const openDrawer = useDrawerStore((s) => s.open);
+  const { dateFrom, dateTo } = useDateRangeParams();
+  const range = { dateFrom, dateTo };
 
-  const kpisQuery = useDealersKpis(initialKpis ?? undefined);
-  const leaderboardQuery = useDealersLeaderboard();
-  const riskAlertsQuery = useDealersRiskAlerts();
-  const listQuery = useDealersList({ ...state, q: debouncedQuery, status: statusFilter }, initialList ?? undefined);
+  const kpisQuery = useDealersKpis(range, initialKpis ?? undefined);
+  const leaderboardQuery = useDealersLeaderboard(range);
+  const riskAlertsQuery = useDealersRiskAlerts(range);
+  const listQuery = useDealersList({ ...state, q: debouncedQuery, status: statusFilter, ...range }, initialList ?? undefined);
 
   const kpis = kpisQuery.data;
   const sorting: SortingState = state.sortBy ? [{ id: state.sortBy, desc: state.sortDir === "desc" }] : [];

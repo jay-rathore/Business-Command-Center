@@ -6,6 +6,7 @@ import { AlertTriangle, Boxes, IndianRupee, Layers, Package, ShoppingCart, Trend
 import { PaginatedResponse, ProductListItem, ProductsStatSummary } from "@hpl/shared";
 import { useTableState } from "@/hooks/useTableState";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useDateRangeParams } from "@/hooks/useDateRangeParams";
 import {
   useProductCategories,
   useProductsByCategory,
@@ -35,14 +36,16 @@ export function ProductsView({
   const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
   const debouncedQuery = useDebounce(state.q);
   const openDrawer = useDrawerStore((s) => s.open);
+  const { dateFrom, dateTo } = useDateRangeParams();
+  const range = { dateFrom, dateTo };
 
   const catalogQuery = useProductsCatalog(
-    { ...state, q: debouncedQuery, categoryId },
+    { ...state, q: debouncedQuery, categoryId, ...range },
     initialCatalog ?? undefined,
   );
-  const statsQuery = useProductsStatSummary(initialStats ?? undefined);
-  const categoryBreakdownQuery = useProductsByCategory();
-  const needsAttentionQuery = useProductsNeedsAttention();
+  const statsQuery = useProductsStatSummary(range, initialStats ?? undefined);
+  const categoryBreakdownQuery = useProductsByCategory(range);
+  const needsAttentionQuery = useProductsNeedsAttention(range);
   const categoriesQuery = useProductCategories();
 
   const stats = statsQuery.data;

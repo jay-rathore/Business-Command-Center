@@ -11,6 +11,7 @@ import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
 import { buildPaginatedResponse } from "../common/utils/paginate";
 import { daysAgo } from "../common/utils/date";
+import { dateRangeWhere, endOfDay, getPreviousEquivalentPeriod, parseDateOnly } from "../common/utils/date-range.util";
 import { DealersListQueryDto, isDealerComputedSortKey } from "./dto/dealers-list-query.dto";
 import { DealerScoringService } from "./dealer-scoring.service";
 
@@ -33,7 +34,7 @@ export class DealersService {
   ) {}
 
   async findAll(query: DealersListQueryDto): Promise<PaginatedResponse<DealerListItem>> {
-    const { page, pageSize, sortBy, sortDir, q, status, state } = query;
+    const { page, pageSize, sortBy, sortDir, q, status, state, dateFrom, dateTo } = query;
 
     const where: Prisma.DealerWhereInput = {
       ...(status ? { status } : {}),
@@ -51,7 +52,7 @@ export class DealersService {
 
     if (isDealerComputedSortKey(sortBy)) {
       const all = await this.prisma.dealer.findMany({ where, include: { assignedManager: true } });
-      const stats = await this.getOrderStats(all.map((d) => d.id));
+      const stats = await this.getOrderStats(all.map((d) => d.id), dateFrom, dateTo);
       const items = all.map((d) => this.toListItem(d, stats.get(d.id)));
       items.sort((a, b) => {
         const av = (a[sortBy] ?? -Infinity) as number;
@@ -74,7 +75,7 @@ export class DealersService {
       this.prisma.dealer.count({ where }),
     ]);
 
-    const stats = await this.getOrderStats(dealers.map((d) => d.id));
+    const stats = await this.getOrderStats(dealers.map((d) => d.id), dateFrom, dateTo);
     const data = dealers.map((d) => this.toListItem(d, stats.get(d.id)));
     return buildPaginatedResponse(data, total, page, pageSize);
   }
@@ -96,34 +97,37 @@ export class DealersService {
     };
   }
 
-  async getKpis(): Promise<DealersKpis> {
+  async getKpis(dateFrom?: string, dateTo?: string): Promise<DealersKpis> {
     const [statusCounts, allDealers] = await Promise.all([
       this.prisma.dealer.groupBy({ by: ["status"], _count: { _all: true } }),
       this.prisma.dealer.findMany({ select: { id: true, healthScore: true } }),
     ]);
 
     const countByStatus = new Map(statusCounts.map((r) => [r.status, r._count._all]));
-    const stats = await this.getOrderStats(allDealers.map((d) => d.id));
+    const stats = await this.getOrderStats(allDealers.map((d) => d.id), dateFrom, dateTo);
 
     let networkRevenue = 0;
-    let currentTotal = 0;
-    let previousTotal = 0;
-    const now = new Date();
-    const currentStart = daysAgo(30, now);
-    const previousStart = daysAgo(60, now);
+    let currentWhere: Prisma.OrderWhereInput;
+    let previousWhere: Prisma.OrderWhereInput;
+    if (dateFrom || dateTo) {
+      const current = { from: dateFrom ? parseDateOnly(dateFrom) : new Date(0), to: dateTo ? parseDateOnly(dateTo) : new Date() };
+      const previous = getPreviousEquivalentPeriod(current);
+      currentWhere = { ...NOT_CANCELLED, dealerId: { not: null }, orderDate: { gte: current.from, lte: endOfDay(current.to) } };
+      previousWhere = { ...NOT_CANCELLED, dealerId: { not: null }, orderDate: { gte: previous.from, lte: endOfDay(previous.to) } };
+    } else {
+      const now = new Date();
+      const currentStart = daysAgo(30, now);
+      const previousStart = daysAgo(60, now);
+      currentWhere = { ...NOT_CANCELLED, dealerId: { not: null }, orderDate: { gte: currentStart } };
+      previousWhere = { ...NOT_CANCELLED, dealerId: { not: null }, orderDate: { gte: previousStart, lt: currentStart } };
+    }
 
     const [currentAgg, previousAgg] = await Promise.all([
-      this.prisma.order.aggregate({
-        where: { ...NOT_CANCELLED, dealerId: { not: null }, orderDate: { gte: currentStart } },
-        _sum: { totalAmount: true },
-      }),
-      this.prisma.order.aggregate({
-        where: { ...NOT_CANCELLED, dealerId: { not: null }, orderDate: { gte: previousStart, lt: currentStart } },
-        _sum: { totalAmount: true },
-      }),
+      this.prisma.order.aggregate({ where: currentWhere, _sum: { totalAmount: true } }),
+      this.prisma.order.aggregate({ where: previousWhere, _sum: { totalAmount: true } }),
     ]);
-    currentTotal = Number(currentAgg._sum.totalAmount ?? 0);
-    previousTotal = Number(previousAgg._sum.totalAmount ?? 0);
+    const currentTotal = Number(currentAgg._sum.totalAmount ?? 0);
+    const previousTotal = Number(previousAgg._sum.totalAmount ?? 0);
 
     for (const s of stats.values()) networkRevenue += s.revenue;
 
@@ -141,12 +145,12 @@ export class DealersService {
     };
   }
 
-  async getLeaderboard(): Promise<DealerLeaderboardEntry[]> {
+  async getLeaderboard(dateFrom?: string, dateTo?: string): Promise<DealerLeaderboardEntry[]> {
     const dealers = await this.prisma.dealer.findMany({
       orderBy: { healthScore: "desc" },
       take: 5,
     });
-    const stats = await this.getOrderStats(dealers.map((d) => d.id));
+    const stats = await this.getOrderStats(dealers.map((d) => d.id), dateFrom, dateTo);
     return dealers.map((d) => ({
       id: d.id,
       name: d.name,
@@ -156,14 +160,14 @@ export class DealersService {
     }));
   }
 
-  async getRiskAlerts(): Promise<DealerListItem[]> {
+  async getRiskAlerts(dateFrom?: string, dateTo?: string): Promise<DealerListItem[]> {
     const dealers = await this.prisma.dealer.findMany({
       where: { status: { in: [DealerStatus.AT_RISK, DealerStatus.INACTIVE] } },
       include: { assignedManager: true },
       orderBy: { healthScore: "asc" },
       take: 8,
     });
-    const stats = await this.getOrderStats(dealers.map((d) => d.id));
+    const stats = await this.getOrderStats(dealers.map((d) => d.id), dateFrom, dateTo);
     return dealers.map((d) => this.toListItem(d, stats.get(d.id)));
   }
 
@@ -206,34 +210,48 @@ export class DealersService {
     };
   }
 
-  private async getOrderStats(dealerIds: string[]): Promise<Map<string, DealerOrderStats>> {
+  private async getOrderStats(dealerIds: string[], dateFrom?: string, dateTo?: string): Promise<Map<string, DealerOrderStats>> {
     const result = new Map<string, DealerOrderStats>();
     if (dealerIds.length === 0) return result;
 
     const now = new Date();
-    const currentStart = daysAgo(30, now);
-    const previousStart = daysAgo(60, now);
+    let currentWhere: Prisma.OrderWhereInput;
+    let previousWhere: Prisma.OrderWhereInput;
+    if (dateFrom || dateTo) {
+      const current = { from: dateFrom ? parseDateOnly(dateFrom) : new Date(0), to: dateTo ? parseDateOnly(dateTo) : now };
+      const previous = getPreviousEquivalentPeriod(current);
+      currentWhere = { orderDate: { gte: current.from, lte: endOfDay(current.to) } };
+      previousWhere = { orderDate: { gte: previous.from, lte: endOfDay(previous.to) } };
+    } else {
+      const currentStart = daysAgo(30, now);
+      const previousStart = daysAgo(60, now);
+      currentWhere = { orderDate: { gte: currentStart } };
+      previousWhere = { orderDate: { gte: previousStart, lt: currentStart } };
+    }
+    // "Lifetime" totals become range-scoped once a range is supplied — omitting dateFrom/dateTo
+    // keeps the true lifetime aggregate this method returned before.
+    const rangeFilter = dateRangeWhere("orderDate", dateFrom, dateTo);
 
     const [lifetime, lastOrder, currentRevenue, previousRevenue] = await Promise.all([
       this.prisma.order.groupBy({
         by: ["dealerId"],
-        where: { dealerId: { in: dealerIds }, ...NOT_CANCELLED },
+        where: { dealerId: { in: dealerIds }, ...NOT_CANCELLED, ...rangeFilter },
         _count: { _all: true },
         _sum: { totalAmount: true },
       }),
       this.prisma.order.groupBy({
         by: ["dealerId"],
-        where: { dealerId: { in: dealerIds }, ...NOT_CANCELLED },
+        where: { dealerId: { in: dealerIds }, ...NOT_CANCELLED, ...rangeFilter },
         _max: { orderDate: true },
       }),
       this.prisma.order.groupBy({
         by: ["dealerId"],
-        where: { dealerId: { in: dealerIds }, ...NOT_CANCELLED, orderDate: { gte: currentStart } },
+        where: { dealerId: { in: dealerIds }, ...NOT_CANCELLED, ...currentWhere },
         _sum: { totalAmount: true },
       }),
       this.prisma.order.groupBy({
         by: ["dealerId"],
-        where: { dealerId: { in: dealerIds }, ...NOT_CANCELLED, orderDate: { gte: previousStart, lt: currentStart } },
+        where: { dealerId: { in: dealerIds }, ...NOT_CANCELLED, ...previousWhere },
         _sum: { totalAmount: true },
       }),
     ]);

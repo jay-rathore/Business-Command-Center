@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsString } from "class-validator";
 import { ListQueryDto } from "../../common/dto/list-query.dto";
 
 const COMPUTED_SORT_KEYS = ["units", "orders", "revenue", "growth"] as const;
@@ -12,6 +12,14 @@ export class ProductsListQueryDto extends ListQueryDto {
   @IsOptional()
   @IsIn(["name", "sku", "category", ...COMPUTED_SORT_KEYS])
   declare sortBy?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 }
 
 export function isComputedSortKey(key: string | undefined): key is ComputedSortKey {

@@ -15,6 +15,7 @@ import {
 import { PRISMA_EXTENDED_CLIENT } from "../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../prisma/prisma-extended.provider";
 import { buildPaginatedResponse } from "../common/utils/paginate";
+import { dateRangeWhere, endOfDay, getPreviousEquivalentPeriod, parseDateOnly } from "../common/utils/date-range.util";
 import { ProductsListQueryDto, isComputedSortKey } from "./dto/products-list-query.dto";
 
 const GROWTH_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -33,7 +34,7 @@ export class ProductsService {
   constructor(@Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient) {}
 
   async findCatalog(query: ProductsListQueryDto): Promise<PaginatedResponse<ProductListItem>> {
-    const { page, pageSize, sortBy, sortDir, q, categoryId } = query;
+    const { page, pageSize, sortBy, sortDir, q, categoryId, dateFrom, dateTo } = query;
 
     const where: Prisma.ProductWhereInput = {
       ...(categoryId ? { categoryId } : {}),
@@ -53,7 +54,7 @@ export class ProductsService {
     // in memory — rather than faking a stored column just to get DB-level ORDER BY.
     if (isComputedSortKey(sortBy)) {
       const all = await this.prisma.product.findMany({ where, include: { category: true, shade: true } });
-      const stats = await this.getPerformanceStats(all.map((p) => p.id));
+      const stats = await this.getPerformanceStats(all.map((p) => p.id), dateFrom, dateTo);
       const items = all.map((p) => this.toListItem(p, stats.get(p.id)));
       items.sort((a, b) => {
         const av = a[sortBy] ?? -Infinity;
@@ -76,7 +77,7 @@ export class ProductsService {
       this.prisma.product.count({ where }),
     ]);
 
-    const stats = await this.getPerformanceStats(products.map((p) => p.id));
+    const stats = await this.getPerformanceStats(products.map((p) => p.id), dateFrom, dateTo);
     const data = products.map((p) => this.toListItem(p, stats.get(p.id)));
     return buildPaginatedResponse(data, total, page, pageSize);
   }
@@ -104,9 +105,9 @@ export class ProductsService {
     return shades.map((s) => ({ id: s.id, name: s.name }));
   }
 
-  async getStatSummary(): Promise<ProductsStatSummary> {
+  async getStatSummary(dateFrom?: string, dateTo?: string): Promise<ProductsStatSummary> {
     const products = await this.prisma.product.findMany({ include: { category: true, shade: true } });
-    const stats = await this.getPerformanceStats(products.map((p) => p.id));
+    const stats = await this.getPerformanceStats(products.map((p) => p.id), dateFrom, dateTo);
 
     let unitsSold = 0;
     let totalOrders = 0;
@@ -143,7 +144,7 @@ export class ProductsService {
     };
   }
 
-  async getCategoryBreakdown(): Promise<CategoryBreakdownEntry[]> {
+  async getCategoryBreakdown(dateFrom?: string, dateTo?: string): Promise<CategoryBreakdownEntry[]> {
     const categories = await this.prisma.productCategory.findMany({
       include: { products: true },
       orderBy: { name: "asc" },
@@ -151,7 +152,7 @@ export class ProductsService {
 
     const results: CategoryBreakdownEntry[] = [];
     for (const category of categories) {
-      const stats = await this.getPerformanceStats(category.products.map((p) => p.id));
+      const stats = await this.getPerformanceStats(category.products.map((p) => p.id), dateFrom, dateTo);
       let units = 0;
       let revenue = 0;
       for (const s of stats.values()) {
@@ -163,9 +164,9 @@ export class ProductsService {
     return results.sort((a, b) => b.revenue - a.revenue);
   }
 
-  async getNeedsAttention(): Promise<ProductListItem[]> {
+  async getNeedsAttention(dateFrom?: string, dateTo?: string): Promise<ProductListItem[]> {
     const products = await this.prisma.product.findMany({ include: { category: true, shade: true } });
-    const stats = await this.getPerformanceStats(products.map((p) => p.id));
+    const stats = await this.getPerformanceStats(products.map((p) => p.id), dateFrom, dateTo);
     return products
       .map((p) => this.toListItem(p, stats.get(p.id)))
       .filter((p) => p.growth !== null && p.growth < 0)
@@ -223,29 +224,50 @@ export class ProductsService {
     return "Low";
   }
 
-  private async getPerformanceStats(productIds: string[]): Promise<Map<string, ProductPerfStats>> {
+  private async getPerformanceStats(
+    productIds: string[],
+    dateFrom?: string,
+    dateTo?: string,
+  ): Promise<Map<string, ProductPerfStats>> {
     const result = new Map<string, ProductPerfStats>();
     if (productIds.length === 0) return result;
 
     const now = new Date();
-    const currentStart = new Date(now.getTime() - GROWTH_WINDOW_MS);
-    const previousStart = new Date(now.getTime() - 2 * GROWTH_WINDOW_MS);
+    let currentOrderDate: Prisma.DateTimeFilter;
+    let previousOrderDate: Prisma.DateTimeFilter;
+    if (dateFrom || dateTo) {
+      const current = { from: dateFrom ? parseDateOnly(dateFrom) : new Date(0), to: dateTo ? parseDateOnly(dateTo) : now };
+      const previous = getPreviousEquivalentPeriod(current);
+      currentOrderDate = { gte: current.from, lte: endOfDay(current.to) };
+      previousOrderDate = { gte: previous.from, lte: endOfDay(previous.to) };
+    } else {
+      const currentStart = new Date(now.getTime() - GROWTH_WINDOW_MS);
+      const previousStart = new Date(now.getTime() - 2 * GROWTH_WINDOW_MS);
+      currentOrderDate = { gte: currentStart };
+      previousOrderDate = { gte: previousStart, lt: currentStart };
+    }
+    // "Lifetime" totals become range-scoped once a range is supplied — omitting dateFrom/dateTo
+    // keeps the true lifetime aggregate this method returned before.
+    const rangeFilter = dateRangeWhere("orderDate", dateFrom, dateTo);
+    const lifetimeWhere = Object.keys(rangeFilter).length
+      ? { productId: { in: productIds }, order: { is: rangeFilter } }
+      : { productId: { in: productIds } };
 
     const [lifetime, currentWindow, previousWindow] = await Promise.all([
       this.prisma.orderItem.groupBy({
         by: ["productId"],
-        where: { productId: { in: productIds } },
+        where: lifetimeWhere,
         _sum: { quantity: true, lineTotal: true },
         _count: { _all: true },
       }),
       this.prisma.orderItem.groupBy({
         by: ["productId"],
-        where: { productId: { in: productIds }, order: { orderDate: { gte: currentStart } } },
+        where: { productId: { in: productIds }, order: { orderDate: currentOrderDate } },
         _sum: { lineTotal: true },
       }),
       this.prisma.orderItem.groupBy({
         by: ["productId"],
-        where: { productId: { in: productIds }, order: { orderDate: { gte: previousStart, lt: currentStart } } },
+        where: { productId: { in: productIds }, order: { orderDate: previousOrderDate } },
         _sum: { lineTotal: true },
       }),
     ]);

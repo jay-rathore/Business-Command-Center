@@ -14,8 +14,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 // Only these pages have period-scoped data (KPIs/trends/breakdowns) — everywhere else the
-// picker would be inert, so it renders as nothing rather than a dead control.
-const DATE_AWARE_ROUTES = ["/dashboard", "/marketing", "/sales", "/leads", "/customers"];
+// picker would be inert, so it renders as nothing rather than a dead control. Projects is
+// deliberately excluded: its KPIs/Kanban/watchlist are a live pipeline snapshot with no date
+// dimension, only its "All Projects" table would react, so showing the picker there would look
+// broken (most of the page staying frozen while one table changes).
+const DATE_AWARE_ROUTES = ["/dashboard", "/marketing", "/sales", "/leads", "/customers", "/dealers", "/products"];
 
 function toDateKey(date: Date): string {
   return format(date, "yyyy-MM-dd");

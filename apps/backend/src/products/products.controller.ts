@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Query } from "@nestjs/common";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
+import { DateRangeQueryDto } from "../common/dto/date-range-query.dto";
 import { ProductsListQueryDto } from "./dto/products-list-query.dto";
 import { ProductsService } from "./products.service";
 
@@ -24,18 +25,18 @@ export class ProductsController {
   }
 
   @Get("stats/summary")
-  getStatSummary() {
-    return this.productsService.getStatSummary();
+  getStatSummary(@Query() query: DateRangeQueryDto) {
+    return this.productsService.getStatSummary(query.dateFrom, query.dateTo);
   }
 
   @Get("stats/by-category")
-  getCategoryBreakdown() {
-    return this.productsService.getCategoryBreakdown();
+  getCategoryBreakdown(@Query() query: DateRangeQueryDto) {
+    return this.productsService.getCategoryBreakdown(query.dateFrom, query.dateTo);
   }
 
   @Get("stats/needs-attention")
-  getNeedsAttention() {
-    return this.productsService.getNeedsAttention();
+  getNeedsAttention(@Query() query: DateRangeQueryDto) {
+    return this.productsService.getNeedsAttention(query.dateFrom, query.dateTo);
   }
 
   @Get(":id")
