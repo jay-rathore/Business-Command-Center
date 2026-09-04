@@ -21,6 +21,8 @@ export const ROLE_PERMISSION_MATRIX: Record<RoleName, RolePermissionSpec[]> = {
     { module: PermissionModule.LEADS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
     { module: PermissionModule.PROJECTS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
     { module: PermissionModule.SALES_TEAM, actions: [PermissionAction.READ, PermissionAction.WRITE] },
+    { module: PermissionModule.ARCHITECTS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
+    { module: PermissionModule.BUILDERS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
     { module: PermissionModule.CUSTOMERS, actions: [PermissionAction.READ, PermissionAction.WRITE] },
     // Sales's own "breakdown by product" view depends on product performance data.
     { module: PermissionModule.PRODUCTS, actions: [PermissionAction.READ] },

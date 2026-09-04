@@ -8,6 +8,9 @@ import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { ProductsModule } from './products/products.module';
 import { SalesModule } from './sales/sales.module';
+import { SalesTeamModule } from './sales-team/sales-team.module';
+import { ArchitectsModule } from './architects/architects.module';
+import { BuildersModule } from './builders/builders.module';
 import { DealersModule } from './dealers/dealers.module';
 import { CustomersModule } from './customers/customers.module';
 import { MarketingModule } from './marketing/marketing.module';
@@ -37,6 +40,9 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
     HealthModule,
     ProductsModule,
     SalesModule,
+    SalesTeamModule,
+    ArchitectsModule,
+    BuildersModule,
     DealersModule,
     CustomersModule,
     MarketingModule,

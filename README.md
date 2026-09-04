@@ -5,18 +5,21 @@ Manufacturing & Distribution. This is the production application — a real, dat
 multi-user, multi-tenant web platform — built from the validated design in `../demo/`.
 
 **Live modules**: Authentication & RBAC, the application shell, Command Center (dashboard),
-Sales, Leads (incl. business-card scan capture + CRM sync), Dealers, Projects, Products,
-Customers, Quotations (manual + Chat-AI + Voice-AI generation, PDF, WhatsApp/email send), and
+Sales, Sales Team (per-executive performance, leaderboard, follow-up risk), Leads (incl.
+business-card scan capture + CRM sync), Dealers, Architects, Builders (referral partner
+directories — projects/leads/samples/revenue influenced), Projects, Products, Customers,
+Quotations (manual + Chat-AI + Voice-AI generation, PDF, WhatsApp/email send), and
 Marketing — campaign performance across Meta Ads, Google Ads, GA4 and Search Console, plus a
 Traffic Intelligence layer (root-cause analysis, AI recommendations, a proactive digest, and
 drill-down investigation) under Marketing → Website & Search. There's also a cross-tenant
 Platform Admin section (organization onboarding, activation, admin password reset) gated behind
-a separate `isPlatformAdmin` flag on the user, not a regular role. Settings is partly live —
-Company Profiles and per-tenant Integration Connections (the credentials the sync services above
-read) are real; user administration/permissions/audit-log within Settings is still "Coming soon".
+a separate `isPlatformAdmin` flag on the user, not a regular role, plus Notifications (bell
+dropdown + full page, role-scoped). Settings is partly live — Company Profiles and per-tenant
+Integration Connections (the credentials the sync services above read) are real; user
+administration/permissions/audit-log within Settings is still "Coming soon".
 
-The remaining modules — Architects, Builders, Sales Team, Complaints, Warranty, Geography,
-AI Insights, Reports, Notifications — still render a plain "Coming soon" state.
+The remaining modules — Complaints, Warranty, Geography, AI Insights, Reports — still render a
+plain "Coming soon" state.
 
 ## Tech stack
 
@@ -33,11 +36,12 @@ AI Insights, Reports, Notifications — still render a plain "Coming soon" state
 
 ```
 apps/backend/      NestJS API — one module per domain:
-                      auth, rbac, company-profiles, customers, dashboard, dealers,
-                      integration-connections, integrations (email, whatsapp), leads
+                      auth, rbac, architects, builders, company-profiles, customers, dashboard,
+                      dealers, integration-connections, integrations (email, whatsapp), leads
                       (+ crm-sync, scan-card), marketing (+ meta-ads-sync, google-ads-sync,
                       google-analytics-sync, search-console-sync, traffic-intelligence),
-                      platform-admin, products, projects, quotations, sales
+                      notifications, platform-admin, products, projects, quotations, sales,
+                      sales-team
                     + prisma/schema.prisma + prisma/seed.ts
 apps/frontend/      Next.js App Router — (auth)/login, (app)/{dashboard,sales,leads,marketing,
                      quotations,platform-admin,...}
