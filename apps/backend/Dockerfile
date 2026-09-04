@@ -50,6 +50,14 @@ COPY --from=build /app/apps/backend/dist ./dist
 COPY --from=build /app/apps/backend/prisma ./prisma
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/backend/package.json ./package.json
+# db:seed (see package.json's "db:seed" script) and the other one-off scripts under prisma/
+# (set-platform-admin.ts, migrate-env-to-connections.ts) run through ts-node at runtime against
+# TypeScript source, not through the compiled dist/ the actual app uses — so both the tsconfig
+# (module/moduleResolution — omitting it makes ts-node fall back to a conflicting default,
+# TS5109) and the src/ files they import from (e.g. prisma/seed.ts imports
+# ../src/rbac/role-permission-matrix) need to actually be present in this image.
+COPY --from=build /app/apps/backend/tsconfig.json ./tsconfig.json
+COPY --from=build /app/apps/backend/src ./src
 EXPOSE 4000
 # nest-cli.json sets sourceRoot: "src", so nest build's output mirrors that under dist/ —
 # the compiled entry point is dist/src/main.js, not dist/main.js.
