@@ -27,6 +27,13 @@ export class MetaAdsSyncController {
       return result;
     } catch (err) {
       await this.connections.recordError(connection.id, err instanceof Error ? err.message : String(err));
+      // A rejected access token is a fixable user input problem, not an unexpected server fault —
+      // surface it as a real 400 instead of letting the plain Error bubble up as an opaque 500.
+      if (this.metaAdsSync.isAuthError(err)) {
+        throw new BadRequestException(
+          "Meta rejected this access token — it may be invalid, expired, or missing the required permissions. Generate a new token via Meta's Graph API Explorer and update the connection.",
+        );
+      }
       throw err;
     }
   }

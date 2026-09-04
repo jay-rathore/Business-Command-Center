@@ -303,13 +303,23 @@ export class MetaAdsSyncService {
     return err instanceof Error ? err.message : String(err);
   }
 
-  private logError(organizationId: string, err: unknown): void {
+  /** True for the class of failure Meta returns when the stored access token is invalid, expired,
+   * or malformed (OAuthException / error code 190 / a plain 401) — as opposed to a network blip,
+   * rate limit, or bug on our side. Public so MetaAdsSyncController's interactive "run now"
+   * endpoint can turn this specific case into a clear 400 instead of an opaque 500; the scheduled
+   * cron sync below uses it just to log a more actionable message. */
+  isAuthError(err: unknown): boolean {
     const message = this.errorMessage(err);
-    if (
+    return (
       message.includes('OAuthException') ||
       message.includes('"code":190') ||
       message.includes(' 401')
-    ) {
+    );
+  }
+
+  private logError(organizationId: string, err: unknown): void {
+    const message = this.errorMessage(err);
+    if (this.isAuthError(err)) {
       this.logger.error(
         `Meta Ads sync failed (org ${organizationId}) — access token likely expired. Generate a new one via ` +
           `Graph API Explorer + Access Token Debugger ("Extend Access Token") and update this tenant's Meta Ads ` +
