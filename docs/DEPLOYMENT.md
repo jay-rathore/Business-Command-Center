@@ -208,14 +208,79 @@ not from `.env` — if you picked a non-default frontend port in Phase 0, edit t
 
 ## Phase 6 — Build, migrate, seed, start
 
-Order matters: the database schema has to exist before the backend can serve traffic without
-crash-looping (some services query the DB during app bootstrap).
+Two ways to get the images onto the VPS. **6A is recommended** — building directly on a small
+shared VPS is exactly what caused the OOM incident in Phase 2's "Swap space" section (it killed an
+unrelated app's database on the same box). 6B is kept for a VPS with real headroom (4+ vCPUs,
+16GB+ RAM) or as a fallback if 6A's registry isn't reachable for some reason.
+
+Order matters either way: the database schema has to exist before the backend can serve traffic
+without crash-looping (some services query the DB during app bootstrap).
+
+### Phase 6A — Build elsewhere, deploy prebuilt images (recommended)
+
+Build on a separate machine — your own laptop/desktop, anywhere with Docker and more headroom than
+a small shared VPS — and push to GitHub's container registry (`ghcr.io`, free for a public repo).
+The VPS then only ever `pull`s a finished image: no compilation, no `npm install`, minimal
+memory/CPU, and it structurally can't repeat the OOM incident no matter what else is running on
+the box — `docker/docker-compose.deploy.yml` has no `build:` section at all.
+
+**One-time, on the build machine:**
+1. Create a GitHub token: https://github.com/settings/tokens → Generate new token (classic) →
+   scope `write:packages` → Generate, copy it (shown once).
+2. Log in:
+   ```bash
+   docker login ghcr.io -u <your-github-username>
+   ```
+   Paste the token as the password when prompted.
+
+**Every time you deploy new code, on the build machine** (repo root — replace
+`<github-username>` and `<VPS_IP>`):
+```bash
+docker build -f apps/backend/Dockerfile --target prod -t ghcr.io/<github-username>/hpl-command-center-backend:latest .
+docker build -f apps/frontend/Dockerfile --target prod --build-arg NEXT_PUBLIC_API_URL=http://<VPS_IP>:4000 -t ghcr.io/<github-username>/hpl-command-center-frontend:latest .
+
+docker push ghcr.io/<github-username>/hpl-command-center-backend:latest
+docker push ghcr.io/<github-username>/hpl-command-center-frontend:latest
+```
+The frontend build still needs `NEXT_PUBLIC_API_URL` as a build arg, same reason as always (baked
+into the browser bundle at build time) — just supplied directly here since this step doesn't go
+through Compose or read `.env`.
+
+**One-time, after the first push:** new GHCR packages default to Private. Make both Public so the
+VPS can pull without its own login — on GitHub: your profile → Packages → select the package →
+Package settings → Change visibility → Public. (Keeping them Private and running `docker login
+ghcr.io` on the VPS too, with a read-only token, also works — Public is simpler when the repo
+itself is already public.)
+
+**On the VPS**, pull and run — note this uses `docker-compose.deploy.yml`, not
+`docker-compose.prod.yml`:
+```bash
+git pull origin feature/multi-tenant-saas-foundation   # get docker-compose.deploy.yml if you don't have it yet
+
+docker compose -f docker/docker-compose.deploy.yml --env-file .env pull
+
+docker compose -f docker/docker-compose.deploy.yml --env-file .env up -d postgres
+docker compose -f docker/docker-compose.deploy.yml --env-file .env ps
+
+docker compose -f docker/docker-compose.deploy.yml --env-file .env run --rm backend npx prisma migrate deploy
+
+# Seed demo data — gives you working login credentials to verify the deploy end-to-end.
+# This is fabricated demo data (~500 orders, 30 dealers, a handful of architects/builders, etc.)
+# for a clean-start deploy; skip this if/when restoring a real DB dump instead.
+docker compose -f docker/docker-compose.deploy.yml --env-file .env run --rm backend npm run db:seed
+
+docker compose -f docker/docker-compose.deploy.yml --env-file .env up -d
+```
+
+### Phase 6B — Build directly on the VPS (alternative, needs real headroom)
+
+Only do this if the VPS genuinely has spare CPU/RAM beyond what's already running on it (check
+Phase 0's numbers again with that in mind), and swap is already set up per Phase 2.
 
 Build the two application images **one at a time**, not together — `docker compose build` with no
 service name builds everything in parallel, and a concurrent Next.js + Nest build is exactly what
-caused the OOM incident described in Phase 2's "Swap space" section. Sequential is slower but caps
-peak memory to one build's worth instead of both at once — do this even with swap in place, it's
-extra insurance rather than a substitute for it:
+caused the OOM incident in the first place. Sequential caps peak memory to one build's worth
+instead of both at once — do this even with swap in place, it's extra insurance, not a substitute:
 
 ```bash
 # 1. Build images — one service at a time
@@ -229,9 +294,7 @@ docker compose -f docker/docker-compose.prod.yml --env-file .env ps
 # 3. Run migrations (one-off container; exits when done)
 docker compose -f docker/docker-compose.prod.yml --env-file .env run --rm backend npx prisma migrate deploy
 
-# 4. Seed demo data — gives you working login credentials to verify the deploy end-to-end.
-#    This is fabricated demo data (~500 orders, 30 dealers, a handful of architects/builders,
-#    etc.) for a clean-start deploy; skip this step if/when restoring a real DB dump instead.
+# 4. Seed demo data — same caveat as 6A above
 docker compose -f docker/docker-compose.prod.yml --env-file .env run --rm backend npm run db:seed
 
 # 5. Start everything
@@ -240,9 +303,11 @@ docker compose -f docker/docker-compose.prod.yml --env-file .env up -d
 
 ## Phase 7 — Verify
 
+Use whichever compose file you actually deployed with — `docker-compose.deploy.yml` for 6A,
+`docker-compose.prod.yml` for 6B:
 ```bash
-docker compose -f docker/docker-compose.prod.yml --env-file .env ps      # all "Up"
-docker compose -f docker/docker-compose.prod.yml --env-file .env logs backend --tail 50
+docker compose -f docker/docker-compose.deploy.yml --env-file .env ps      # all "Up"
+docker compose -f docker/docker-compose.deploy.yml --env-file .env logs backend --tail 50
 ```
 
 From a browser: `http://<VPS_IP>:<frontend port>` → log in with `owner@hplmaker.demo` /
@@ -250,14 +315,23 @@ From a browser: `http://<VPS_IP>:<frontend port>` → log in with `owner@hplmake
 
 **Login succeeds but immediately bounces back to the login page** → `CORS_ORIGIN` and/or
 `NEXT_PUBLIC_API_URL` don't match what you're actually visiting. Fix `.env`, then:
-```bash
-docker compose -f docker/docker-compose.prod.yml --env-file .env up -d --build frontend
-```
-(`--build` is required if `NEXT_PUBLIC_API_URL` changed — it's baked in, a plain restart won't
-pick up the new value.)
+- **6B (built on the VPS):**
+  ```bash
+  docker compose -f docker/docker-compose.prod.yml --env-file .env up -d --build frontend
+  ```
+- **6A (prebuilt image):** `NEXT_PUBLIC_API_URL` is baked into the image itself, so fixing `.env`
+  on the VPS alone isn't enough — rebuild and push from the build machine with the corrected
+  value (Phase 6A's frontend `docker build --build-arg` command), then on the VPS:
+  ```bash
+  docker compose -f docker/docker-compose.deploy.yml --env-file .env pull frontend
+  docker compose -f docker/docker-compose.deploy.yml --env-file .env up -d frontend
+  ```
 
-**Backend container keeps restarting** → check `logs backend`; almost always means Phase 6 step 3
-(migrations) didn't run or didn't finish before step 5.
+Either way, a plain restart alone won't pick up the new value — it's baked in at build time, not
+read at container start.
+
+**Backend container keeps restarting** → check `logs backend`; almost always means Phase 6's
+migrations step didn't run or didn't finish before `up -d`.
 
 ## Deploy-blocking bugs already fixed in this codebase
 

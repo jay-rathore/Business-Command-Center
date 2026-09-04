@@ -1,0 +1,56 @@
+name: hpl-command-center
+
+# Deploy-only compose — deliberately has no `build:` section anywhere in this file, so there is
+# no way to accidentally trigger a heavy local build on a resource-constrained VPS (see
+# docs/DEPLOYMENT.md's "Build elsewhere, deploy prebuilt images" section for why this exists:
+# building directly on a small shared VPS caused real memory-pressure incidents, including
+# taking down an unrelated app's database via the kernel OOM killer).
+#
+# Images are built and pushed to ghcr.io from a separate, unconstrained machine using
+# docker/docker-compose.prod.yml (or plain `docker build`/`docker push`). This file only ever
+# pulls the finished images and runs them:
+#   docker compose -f docker/docker-compose.deploy.yml --env-file .env pull
+#   docker compose -f docker/docker-compose.deploy.yml --env-file .env up -d
+#
+# Everything else — no published Postgres port, restart: unless-stopped, env vars from .env —
+# matches docker-compose.prod.yml exactly.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: ghcr.io/jay-rathore/hpl-command-center-backend:latest
+    restart: unless-stopped
+    env_file: ../.env
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: ghcr.io/jay-rathore/hpl-command-center-frontend:latest
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      INTERNAL_API_URL: http://backend:4000
+    ports:
+      - "8080:3005"
+    depends_on:
+      - backend
+
+volumes:
+  pg_data:
