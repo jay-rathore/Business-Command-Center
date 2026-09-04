@@ -1,0 +1,63 @@
+name: hpl-command-center
+
+# Production compose — uses each Dockerfile's `prod` target (built image, no bind mounts, no
+# dev toolchain) instead of docker-compose.yml's `dev` target. Run from the repo root with:
+#   docker compose -f docker/docker-compose.prod.yml --env-file .env up -d --build
+#
+# Differences from the dev compose worth knowing:
+# - postgres publishes no host port — only reachable from other containers on this compose
+#   network, so it isn't exposed to the internet just by virtue of the VPS having a public IP.
+# - frontend's NEXT_PUBLIC_API_URL is passed as a build arg, not a runtime env var — Next.js
+#   inlines NEXT_PUBLIC_* into the browser bundle at `next build` time (see apps/frontend/
+#   Dockerfile), so it must be correct in .env *before* `--build` runs, and the image has to be
+#   rebuilt (not just restarted) if it ever changes (e.g. adding a domain later).
+# - restart: unless-stopped on every service so the stack survives a VPS reboot without a
+#   separate systemd unit.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+      target: prod
+    restart: unless-stopped
+    env_file: ../.env
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: apps/frontend/Dockerfile
+      target: prod
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      INTERNAL_API_URL: http://backend:4000
+    ports:
+      - "80:3005"
+    depends_on:
+      - backend
+
+volumes:
+  pg_data:

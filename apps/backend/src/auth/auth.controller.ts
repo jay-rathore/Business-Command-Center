@@ -36,17 +36,21 @@ export class AuthController {
   ) {}
 
   private setAuthCookies(res: Response, tokens: { accessToken: string; refreshToken: string }) {
-    const isProd = this.config.get<string>('NODE_ENV') === 'production';
+    // Deliberately its own flag, not NODE_ENV === 'production' — a prod Docker image can still
+    // be served over plain HTTP (e.g. a bare VPS IP before a domain/SSL is set up), and a
+    // Secure cookie is silently dropped by the browser on HTTP, breaking auth with no visible
+    // error. Set COOKIE_SECURE=true once the app is actually served over HTTPS.
+    const secure = this.config.get<string>('COOKIE_SECURE') === 'true';
     res.cookie(ACCESS_COOKIE, tokens.accessToken, {
       httpOnly: true,
-      secure: isProd,
+      secure,
       sameSite: 'lax',
       maxAge: FIFTEEN_MINUTES_MS,
       path: '/',
     });
     res.cookie(REFRESH_COOKIE, tokens.refreshToken, {
       httpOnly: true,
-      secure: isProd,
+      secure,
       sameSite: 'lax',
       maxAge: THIRTY_DAYS_MS,
       path: '/api/auth',

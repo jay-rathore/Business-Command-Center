@@ -20,7 +20,12 @@ EXPOSE 3005
 CMD ["npm", "run", "dev"]
 
 # --- build: production build (used later once a hosting target is picked) ---
+# NEXT_PUBLIC_API_URL is read client-side (apps/frontend/lib/api/apiClient.ts etc.) — Next.js
+# inlines NEXT_PUBLIC_* vars into the browser bundle at `next build` time, so it must arrive as
+# a build ARG here, not as a runtime env var on the `prod` container (too late by then).
 FROM deps AS build
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 COPY . .
 RUN npm run build -w packages/shared
 WORKDIR /app/apps/frontend
