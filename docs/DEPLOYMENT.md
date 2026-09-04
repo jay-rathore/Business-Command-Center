@@ -5,7 +5,28 @@ Dockerfile's `prod` target (see `docker/docker-compose.prod.yml`). Written from 
 onto a shared Hostinger KVM VPS that already runs unrelated services — the pre-flight phase below
 exists specifically because of that, and is worth doing even on a VPS you believe is empty.
 
-Every command below assumes you're SSH'd in as `root` (or a sudo user — prefix with `sudo`).
+Every command below assumes you're SSH'd in as `root` (or a sudo user — prefix with `sudo`),
+**except Phase 6A's build/push commands, which run on a separate machine** (your own
+laptop/desktop) — that phase says so explicitly every time, but if you ever lose track of which
+terminal a command belongs in: the VPS prompt looks like `root@<hostname>:~#`, your local
+machine's prompt looks like your normal shell. Running a build-machine command inside the VPS
+SSH session (or vice versa) fails in confusing ways rather than with an obvious "wrong machine"
+error, so when in doubt, check the prompt.
+
+## Troubleshooting index
+
+Jump straight to a fix if you recognize the symptom — each links to the phase with full detail.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `docker compose up` fails to bind a port | Something else already on that port | "Picking ports" below, before Phase 2 |
+| SSH connection itself gets slow/refused | VPS out of memory, likely from a build | Phase 2 "Swap space"; Phase 6A avoids this entirely |
+| An unrelated service on the box (another app's DB, a CI runner) stops working after a deploy attempt | Kernel OOM-killed it, not just your build | "If the OOM killer took down something else" below |
+| `docker build`/`nest build`/`next build` dies with "JavaScript heap out of memory" | Node's default heap ceiling | Already fixed in both Dockerfiles (see "Deploy-blocking bugs" near the end, #3) — pull latest if you still see this |
+| `docker compose <anything>` hangs with zero output, even `docker compose version` | Compose plugin itself broken on that box | Phase 6A → "If docker compose itself hangs" |
+| Login succeeds then immediately bounces back | `CORS_ORIGIN`/`NEXT_PUBLIC_API_URL` mismatch | Phase 7 |
+| Backend container keeps restarting | Migrations never ran | Phase 6, run the `migrate deploy` step |
+| `db:seed` errors with `TS5109` or `Cannot find module '../src/...'` | Already fixed in the Dockerfile (see "Deploy-blocking bugs" near the end, #5) | Pull latest image |
 
 ## Architecture recap
 
@@ -112,6 +133,34 @@ swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab   # survives a reboot
 free -h   # confirm Swap now shows 4.0Gi
 ```
+
+### If the OOM killer took down something else (recovery)
+
+If you're reading this *after* a memory spike already happened — first check whether anything
+unrelated to this deploy got killed as collateral damage:
+
+```bash
+systemctl --failed   # lists every failed unit by name
+```
+
+For anything listed, check *when* it failed before assuming it's your fault — a unit that's been
+failed for weeks is unrelated, one that failed in the last few minutes probably isn't:
+```bash
+systemctl status <unit-name> --no-pager | grep -A1 Active   # shows the exact failure timestamp
+```
+
+Many services (this codebase's own Postgres/MySQL included, in the real incident this section is
+based on) auto-restart via systemd and need nothing further — `systemctl status` will already
+show `active (running)`. If one didn't recover on its own:
+```bash
+systemctl restart <unit-name>
+systemctl status <unit-name> --no-pager   # confirm it's active (running) now
+```
+
+If that unit belongs to a different application than this one, it's worth telling whoever owns
+that app that it went down, in case something was mid-write when it was killed — auto-restarting
+the process doesn't rule out a corrupted write, and that's not something to assess from the
+infrastructure side alone.
 
 ## Phase 3 — Docker
 
@@ -344,11 +393,20 @@ docker compose -f docker/docker-compose.prod.yml --env-file .env up -d
 
 ## Phase 7 — Verify
 
-Use whichever compose file you actually deployed with — `docker-compose.deploy.yml` for 6A,
-`docker-compose.prod.yml` for 6B:
+If `docker compose` actually works on your box, use whichever compose file you deployed with —
+`docker-compose.deploy.yml` for 6A, `docker-compose.prod.yml` for 6B:
 ```bash
 docker compose -f docker/docker-compose.deploy.yml --env-file .env ps      # all "Up"
 docker compose -f docker/docker-compose.deploy.yml --env-file .env logs backend --tail 50
+```
+
+**If you deployed via the plain-`docker` fallback** (compose hanging on the VPS), check the same
+things this way instead — this is what actually confirmed the real deploy worked:
+```bash
+docker ps                                              # postgres, backend, frontend all "Up"
+docker logs backend --tail 50                          # look for "Nest application successfully started"
+curl -s -X POST http://localhost:4000/api/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"owner@hplmaker.demo","password":"Passw0rd!123"}'   # should return a user JSON object, not an error
 ```
 
 From a browser: `http://<VPS_IP>:<frontend port>` → log in with `owner@hplmaker.demo` /
@@ -367,12 +425,19 @@ From a browser: `http://<VPS_IP>:<frontend port>` → log in with `owner@hplmake
   docker compose -f docker/docker-compose.deploy.yml --env-file .env pull frontend
   docker compose -f docker/docker-compose.deploy.yml --env-file .env up -d frontend
   ```
+  Or, on the plain-`docker` path:
+  ```bash
+  docker pull ghcr.io/<github-username>/hpl-command-center-frontend:latest
+  docker stop frontend && docker rm frontend
+  docker run -d --name frontend --network hpl-network --restart unless-stopped --env-file .env \
+    -p 8080:3005 ghcr.io/<github-username>/hpl-command-center-frontend:latest
+  ```
 
 Either way, a plain restart alone won't pick up the new value — it's baked in at build time, not
 read at container start.
 
 **Backend container keeps restarting** → check `logs backend`; almost always means Phase 6's
-migrations step didn't run or didn't finish before `up -d`.
+migrations step didn't run or didn't finish before `up -d`/`docker run`.
 
 ## Deploy-blocking bugs already fixed in this codebase
 
