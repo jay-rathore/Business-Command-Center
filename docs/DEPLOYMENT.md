@@ -52,6 +52,9 @@ nproc                                       # CPU count
 - **`docker ps -a` errors with "Cannot connect to the Docker daemon"** — Docker may be installed
   but stopped (`systemctl status docker` will show `inactive`), or not installed at all. Both are
   handled in Phase 3.
+- **`free -h` shows `Swap: 0B`.** Treat this as a blocker, not a nice-to-have, on any box under
+  ~16GB RAM — see "Swap space" in Phase 2 for why, and set it up *before* Phase 6's build, not
+  after.
 
 ### Picking ports
 
@@ -89,6 +92,25 @@ Open this app's ports — substitute your actual choices from "Picking ports" ab
 ufw allow 80/tcp     # or 8080, etc. — frontend
 ufw allow 4000/tcp   # backend
 ufw status verbose   # confirm both show ALLOW, and nothing else changed
+```
+
+### Swap space — do this if Phase 0 showed `Swap: 0B`
+
+**Not optional on a shared box.** During a real deploy on an 8GB/2-vCPU VPS with zero swap, the
+Docker build's memory usage combined with an unrelated app already running on the box pushed the
+kernel into OOM (out-of-memory) killing — and it didn't just kill our build, it killed that other
+app's **MySQL process**, taking its database down until systemd auto-restarted it. With swap in
+place, the same memory pressure just makes things temporarily slower instead of triggering the
+kernel to start forcibly killing processes (its own, or worse, an unrelated one). Cheap insurance,
+skip it at your own (and everyone else sharing the box's) risk:
+
+```bash
+fallocate -l 4G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab   # survives a reboot
+free -h   # confirm Swap now shows 4.0Gi
 ```
 
 ## Phase 3 — Docker
@@ -189,9 +211,16 @@ not from `.env` — if you picked a non-default frontend port in Phase 0, edit t
 Order matters: the database schema has to exist before the backend can serve traffic without
 crash-looping (some services query the DB during app bootstrap).
 
+Build the two application images **one at a time**, not together — `docker compose build` with no
+service name builds everything in parallel, and a concurrent Next.js + Nest build is exactly what
+caused the OOM incident described in Phase 2's "Swap space" section. Sequential is slower but caps
+peak memory to one build's worth instead of both at once — do this even with swap in place, it's
+extra insurance rather than a substitute for it:
+
 ```bash
-# 1. Build all three images
-docker compose -f docker/docker-compose.prod.yml --env-file .env build
+# 1. Build images — one service at a time
+docker compose -f docker/docker-compose.prod.yml --env-file .env build backend
+docker compose -f docker/docker-compose.prod.yml --env-file .env build frontend
 
 # 2. Start Postgres only, wait for "healthy"
 docker compose -f docker/docker-compose.prod.yml --env-file .env up -d postgres
