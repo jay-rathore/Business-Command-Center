@@ -26,6 +26,9 @@ CMD ["npm", "run", "dev"]
 FROM deps AS build
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# `next build`'s production compile is just as prone to hitting Node's default ~2GB heap ceiling
+# as the backend's `nest build` — see the note in apps/backend/Dockerfile.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 COPY . .
 RUN npm run build -w packages/shared
 WORKDIR /app/apps/frontend

@@ -28,7 +28,11 @@ EXPOSE 4000
 CMD ["npm", "run", "start:dev"]
 
 # --- build: production build (used later once a hosting target is picked) ---
+# `nest build`'s type-checking pass can peak close to Node's default ~2GB heap ceiling on this
+# monorepo — same issue documented in the main README for `nest start --watch` locally, just
+# never fixed here since this stage went unused until a hosting target was picked.
 FROM deps AS build
+ENV NODE_OPTIONS=--max-old-space-size=4096
 COPY . .
 RUN npm run build -w packages/shared
 WORKDIR /app/apps/backend
