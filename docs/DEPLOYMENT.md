@@ -272,6 +272,47 @@ docker compose -f docker/docker-compose.deploy.yml --env-file .env run --rm back
 docker compose -f docker/docker-compose.deploy.yml --env-file .env up -d
 ```
 
+#### If `docker compose` itself hangs with no output on this VPS
+
+Hit this for real: every plain `docker` command (`pull`, `images`, `ps`, `run`) worked fine, but
+*every* `docker compose` subcommand — including `docker compose version`, which touches no
+containers or network at all — hung indefinitely with zero output. That's the compose plugin
+itself being broken on that particular box, unrelated to networking, resources, or this app's
+config (confirmed via the network/memory checks in Phase 0 and this section's own diagnostics).
+
+If `docker compose version` hangs for you too, stop trying to fix it and just run the equivalent
+plain `docker` commands instead — they're a direct 1:1 translation of what
+`docker-compose.deploy.yml` does:
+
+```bash
+# Once, to let the containers reach each other by name
+docker network create hpl-network
+
+# Postgres — name matters: .env's DATABASE_URL points at host "postgres"
+docker run -d --name postgres --network hpl-network --restart unless-stopped --env-file .env \
+  -v hpl_pg_data:/var/lib/postgresql/data postgres:16-alpine
+
+# Wait ~10s, then confirm it's actually ready
+docker exec postgres pg_isready -U hpl_admin
+
+# Migrate + seed (one-off, same as the compose `run --rm` equivalents above)
+docker run --rm --network hpl-network --env-file .env \
+  ghcr.io/<github-username>/hpl-command-center-backend:latest npx prisma migrate deploy
+docker run --rm --network hpl-network --env-file .env \
+  ghcr.io/<github-username>/hpl-command-center-backend:latest npm run db:seed
+
+# Backend and frontend — names matter here too: .env's INTERNAL_API_URL points at host "backend"
+docker run -d --name backend --network hpl-network --restart unless-stopped --env-file .env \
+  -p 4000:4000 ghcr.io/<github-username>/hpl-command-center-backend:latest
+docker run -d --name frontend --network hpl-network --restart unless-stopped --env-file .env \
+  -p 8080:3005 ghcr.io/<github-username>/hpl-command-center-frontend:latest
+```
+
+Verify with plain `docker ps` / `docker logs <name>` instead of `docker compose ps`/`logs` —
+same reasoning, don't trust compose's own output on a box where it's already shown itself to be
+unreliable. This produces the exact same running stack as the compose file would have; the only
+loss is the one-line convenience of managing all three as a group.
+
 ### Phase 6B — Build directly on the VPS (alternative, needs real headroom)
 
 Only do this if the VPS genuinely has spare CPU/RAM beyond what's already running on it (check
@@ -335,8 +376,10 @@ migrations step didn't run or didn't finish before `up -d`.
 
 ## Deploy-blocking bugs already fixed in this codebase
 
-Two real gaps were found and fixed while building this runbook — worth knowing about if either
-resurfaces after a refactor:
+Several real gaps were found and fixed doing the actual first deploy — worth knowing about if any
+resurface after a refactor. The last two in particular existed because nobody had ever actually
+run the `prod` Docker target successfully before this deploy (its own comments said as much:
+"used later once a hosting target is picked" — that day just hadn't come until now).
 
 1. **`NEXT_PUBLIC_API_URL` must be a Docker build ARG, not a runtime env var.** Next.js inlines
    `NEXT_PUBLIC_*` vars into the browser bundle at `next build` time. `apps/frontend/Dockerfile`'s
@@ -347,6 +390,22 @@ resurfaces after a refactor:
    Docker image always sets `NODE_ENV=production` regardless of whether the app is actually
    served over HTTPS — tying the cookie flag to it would make login silently impossible on any
    HTTP-only deploy (`apps/backend/src/auth/auth.controller.ts`).
+3. **Both Dockerfiles' `build` stage can OOM on `nest build`/`next build`.** Node's default ~2GB
+   heap ceiling is close to what a monorepo build of this size can peak at — both Dockerfiles now
+   set `NODE_OPTIONS=--max-old-space-size=4096` in their `build` stage specifically (not `prod` —
+   the running app doesn't need it).
+4. **The `prod` stage copied `node_modules` and the entry point from the wrong paths.**
+   `npm install --workspaces` hoists dependencies to the monorepo root, not into
+   `apps/<app>/node_modules` — that path never exists at all, so both Dockerfiles now copy
+   `/app/node_modules` instead. Separately, the backend's `CMD` ran `node dist/main.js`, but
+   `nest-cli.json`'s `sourceRoot: "src"` means the real compiled entry point is
+   `dist/src/main.js`.
+5. **`db:seed` needs `tsconfig.json` and `src/` present, which the `prod` image never shipped.**
+   `prisma/seed.ts` runs through `ts-node` at container runtime (not through `nest build`'s
+   compiled output), and imports directly from `../src/rbac/role-permission-matrix` and
+   `../src/leads/lead-scoring.util`. Without `tsconfig.json` present, `ts-node` fell back to a
+   default config with a `module`/`moduleResolution` conflict (`TS5109`); without `src/` present,
+   it couldn't resolve those two imports at all. Both are now copied into the `prod` image.
 
 ## Deliberately deferred (not part of a first deploy)
 
