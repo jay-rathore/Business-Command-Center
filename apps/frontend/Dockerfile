@@ -35,11 +35,14 @@ WORKDIR /app/apps/frontend
 RUN npm run build
 
 # --- prod: slim runtime image ---
+# node_modules is copied from the monorepo root, not apps/frontend/ — same reason as
+# apps/backend/Dockerfile: npm's workspace install hoists dependencies to the root node_modules,
+# apps/frontend/node_modules never exists at all.
 FROM base AS prod
 ENV NODE_ENV=production
 COPY --from=build /app/apps/frontend/public ./public
 COPY --from=build /app/apps/frontend/.next ./.next
-COPY --from=build /app/apps/frontend/node_modules ./node_modules
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/frontend/package.json ./package.json
 EXPOSE 3005
 CMD ["npm", "run", "start"]

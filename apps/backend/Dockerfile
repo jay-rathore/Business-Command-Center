@@ -40,11 +40,17 @@ RUN npx prisma generate
 RUN npm run build
 
 # --- prod: slim runtime image ---
+# node_modules is copied from the monorepo root, not apps/backend/ — npm's workspace install
+# hoists dependencies (including the generated Prisma client) to the root node_modules rather
+# than creating one per workspace; apps/backend/node_modules never exists at all. Node's own
+# module resolution walks up from dist/src/main.js to find it there regardless.
 FROM base AS prod
 ENV NODE_ENV=production
 COPY --from=build /app/apps/backend/dist ./dist
 COPY --from=build /app/apps/backend/prisma ./prisma
-COPY --from=build /app/apps/backend/node_modules ./node_modules
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/backend/package.json ./package.json
 EXPOSE 4000
-CMD ["node", "dist/main.js"]
+# nest-cli.json sets sourceRoot: "src", so nest build's output mirrors that under dist/ —
+# the compiled entry point is dist/src/main.js, not dist/main.js.
+CMD ["node", "dist/src/main.js"]
