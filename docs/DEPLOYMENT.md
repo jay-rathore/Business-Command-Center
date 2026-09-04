@@ -117,8 +117,50 @@ git checkout feature/multi-tenant-saas-foundation   # the active branch — main
 
 ```bash
 cp .env.example .env
+```
+
+**Recommended: fill it in with a script**, rather than hand-editing in `nano` while switching to
+another window to generate secrets. Fill in just `VPS_IP` and `FRONTEND_PORT` at the top, then
+paste the whole block as one unit:
+
+```bash
+VPS_IP="203.0.113.10"     # <-- your actual VPS IP
+FRONTEND_PORT="80"        # <-- 80, or whatever alternate you picked in "Picking ports" above
+
+PG_PASSWORD="$(openssl rand -hex 16)"
+JWT_ACCESS_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")"
+JWT_REFRESH_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")"
+INTEGRATION_ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")"
+
+sed -i "s|POSTGRES_PASSWORD=change_me_locally|POSTGRES_PASSWORD=${PG_PASSWORD}|" .env
+sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://hpl_admin:${PG_PASSWORD}@postgres:5432/hpl_command_center|" .env
+sed -i "s|JWT_ACCESS_SECRET=.*|JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}|" .env
+sed -i "s|JWT_REFRESH_SECRET=.*|JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}|" .env
+sed -i "s|INTEGRATION_ENCRYPTION_KEY=|INTEGRATION_ENCRYPTION_KEY=${INTEGRATION_ENCRYPTION_KEY}|" .env
+sed -i "s|CORS_ORIGIN=.*|CORS_ORIGIN=http://${VPS_IP}:${FRONTEND_PORT}|" .env
+sed -i "s|NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://${VPS_IP}:4000|" .env
+
+echo "=== .env now contains: ==="
+cat .env
+echo "=== Save these somewhere safe, especially the encryption key: ==="
+echo "POSTGRES_PASSWORD=${PG_PASSWORD}"
+echo "INTEGRATION_ENCRYPTION_KEY=${INTEGRATION_ENCRYPTION_KEY}"
+```
+
+`node` runs fine here even though it's not installed globally on the VPS — Docker isn't involved
+yet at this point, this just needs *some* Node available; if the VPS genuinely has none, swap
+those three lines for `openssl rand -base64 32` instead, same effect.
+
+If `CORS_ORIGIN` ends up as `http://<ip>:80`, edit that one line to drop the `:80` — the browser
+sends `Origin: http://<ip>` with no port for the default HTTP port, and the two have to match
+exactly or every request gets rejected by CORS.
+
+**Alternative: hand-edit instead.** If you'd rather see and adjust every line yourself:
+```bash
 nano .env
 ```
+Arrow keys to move (no mouse), type to edit, `Ctrl+O` then `Enter` to save, `Ctrl+X` to exit. The
+table below is what to change either way.
 
 | Variable | Set to | Why |
 |---|---|---|
