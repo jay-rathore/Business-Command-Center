@@ -29,6 +29,16 @@ interface Preset {
   range: () => { dateFrom: string; dateTo: string };
 }
 
+// Deliberately an explicit wide range, not {} (cleared params) — every backend endpoint decides
+// what "no range given" means for itself, and that's inconsistent: overview/KPI endpoints (e.g.
+// SalesService.getOverview) default an absent range to the current month, while breakdown/table
+// endpoints (dateRangeWhere-based) treat it as genuinely unrestricted. Sending an explicit range
+// this old forces every endpoint through its normal explicit-range math instead, so "All time"
+// actually means all time everywhere, consistently — see the bug this fixed: a KPI card showing
+// less revenue for "All time" than for "Last 7 days" because "All time" was silently only
+// current-month data.
+const ALL_TIME_FROM = "2000-01-01";
+
 const PRESETS: Preset[] = [
   {
     label: "Today",
@@ -66,8 +76,9 @@ export function DateRangePicker() {
   const isDateAware = DATE_AWARE_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
   if (!isDateAware) return null;
 
+  const isAllTime = dateFrom === ALL_TIME_FROM && dateTo === toDateKey(new Date());
   const activePreset = dateFrom && dateTo ? PRESETS.find((p) => { const r = p.range(); return r.dateFrom === dateFrom && r.dateTo === dateTo; }) : undefined;
-  const label = !dateFrom && !dateTo ? "All time" : activePreset ? activePreset.label : `${dateFrom} – ${dateTo}`;
+  const label = !dateFrom && !dateTo ? "All time" : isAllTime ? "All time" : activePreset ? activePreset.label : `${dateFrom} – ${dateTo}`;
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
@@ -98,7 +109,9 @@ export function DateRangePicker() {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuItem onSelect={() => setRange({})}>All time</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setRange({ dateFrom: ALL_TIME_FROM, dateTo: toDateKey(new Date()) })}>
+          All time
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         {PRESETS.map((preset) => (
           <DropdownMenuItem key={preset.label} onSelect={() => setRange(preset.range())}>
