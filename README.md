@@ -113,6 +113,12 @@ Docker Compose shadows just that one file with `apps/backend/.env.docker.local` 
   `apps/backend/.env` with `DATABASE_URL` pointed at `postgres:5432`, then `docker compose up -d
   backend`.
 
+## Deploying
+
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for a full VPS deployment runbook (Docker Compose
+using each Dockerfile's `prod` target, a pre-flight check for conflicting services on a shared
+box, and the deploy-blocking gaps already found and fixed).
+
 ## Demo credentials
 
 All seeded users share one password: **`Passw0rd!123`**
