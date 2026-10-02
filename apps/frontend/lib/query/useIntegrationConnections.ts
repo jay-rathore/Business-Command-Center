@@ -38,6 +38,7 @@ const SYNC_RUN_PATHS: Partial<Record<IntegrationProvider, string>> = {
   GOOGLE_ANALYTICS: "/api/marketing/google-analytics-sync/run",
   SEARCH_CONSOLE: "/api/marketing/search-console-sync/run",
   WOOCOMMERCE: "/api/products/wc-sync/run",
+  HPL_CRM: "/api/leads/crm-sync/run",
 };
 
 export function isSyncableProvider(provider: IntegrationProvider): boolean {
@@ -62,6 +63,7 @@ export function useTriggerSync() {
       queryClient.invalidateQueries({ queryKey: ["integration-connections"] });
       queryClient.invalidateQueries({ queryKey: ["marketing"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
     },
   });
 }

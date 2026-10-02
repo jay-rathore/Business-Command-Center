@@ -1,10 +1,11 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { NotificationType, PermissionModule, Priority, RoleName } from "@prisma/client";
+import { IntegrationProvider, NotificationType, PermissionModule, Priority, RoleName } from "@prisma/client";
 import { PRISMA_EXTENDED_CLIENT } from "../../prisma/prisma-extended.provider";
 import type { ExtendedPrismaClient } from "../../prisma/prisma-extended.provider";
-import { TenantContext, resolveDefaultOrganizationId } from "../../common/context/tenant-context";
+import { TenantContext } from "../../common/context/tenant-context";
+import { IntegrationConnectionsService } from "../../integration-connections/integration-connections.service";
+import type { HplCrmCredentials } from "../../integration-connections/credential-types";
 import { NotificationsService } from "../../notifications/notifications.service";
 import { computeLeadScore } from "../lead-scoring.util";
 import { classifyStatusName, CRM_STATUS_EXCLUDED_DEPARTMENTS } from "./crm-status-classification";
@@ -14,6 +15,7 @@ import { CrmLeadRaw, CrmLookupRow, mapCrmLead, mapCrmRep } from "./crm-lead-mapp
 const HIGH_VALUE_THRESHOLD = 2000000;
 
 interface CrmLeadListResponse {
+  count: number;
   results: CrmLeadRaw[];
   next: string | null;
 }
@@ -24,13 +26,26 @@ export interface CrmSyncResult {
   updated: number;
 }
 
-/** Keeps hpl-command-center's leads current with the HPL CRM (apiuatcrm.ultracreation.in)
- * WITHOUT re-pulling the full dataset: polls a rolling recent window (the CRM's list API only
- * exposes date-level `created_at_after`, not `updated_at`, so re-fetching the last few days
- * on every run is the practical way to also catch status/detail changes on recent leads, not
- * just brand-new ones). Shares its field-mapping and status-classification logic with the
- * one-time backfill (prisma/import-crm-snapshot.ts) via crm-lead-mapper.ts /
- * crm-status-classification.ts, so there is exactly one place that logic lives. */
+/** Keeps hpl-command-center's leads current with the HPL CRM (apiuatcrm.ultracreation.in), one
+ * tenant at a time, via its own IntegrationConnection (provider HPL_CRM) — same pattern as
+ * MetaAdsSyncService/GoogleAdsSyncService, not a hardcoded single-tenant env var anymore (see
+ * migrate-env-to-connections.ts for how HPL Maker's own credentials got moved in).
+ *
+ * Two sync modes:
+ *  - syncRecent (the scheduled one, every 30 min): polls a rolling recent window
+ *    (`created_at_after`) — cheap, catches new leads and status/detail changes on RECENTLY
+ *    CREATED leads. The CRM's list API only exposes date-level `created_at_after`, not a
+ *    precise `updated_at` filter (as of this writing), so this can't cheaply catch a change on
+ *    a lead created outside the window.
+ *  - fullResync (manual/on-demand): walks every page with no date filter, upserting everything.
+ *    Slower, but closes any drift syncRecent's window structurally can't reach — e.g. a status
+ *    change on an old lead, or a gap left by the sync having been broken for a while (which is
+ *    exactly what happened before this connection was reconnected — see the HPL_CRM connection's
+ *    lastSyncError history for that incident).
+ *
+ * Shares its field-mapping and status-classification logic with the one-time backfill
+ * (prisma/import-crm-snapshot.ts) via crm-lead-mapper.ts / crm-status-classification.ts, so
+ * there is exactly one place that logic lives. */
 @Injectable()
 export class CrmSyncService {
   private readonly logger = new Logger(CrmSyncService.name);
@@ -42,33 +57,48 @@ export class CrmSyncService {
 
   constructor(
     @Inject(PRISMA_EXTENDED_CLIENT) private readonly prisma: ExtendedPrismaClient,
-    private readonly config: ConfigService,
+    private readonly connections: IntegrationConnectionsService,
     private readonly notifications: NotificationsService,
   ) {}
 
   @Cron(CronExpression.EVERY_30_MINUTES)
   async scheduledSync(): Promise<void> {
-    // Cron jobs run outside any HTTP request, so there's no JWT-derived organizationId to read —
-    // resolve the single tenant that exists today instead. See resolveDefaultOrganizationId.
-    const organizationId = await resolveDefaultOrganizationId(this.prisma);
-    await TenantContext.run({ organizationId }, async () => {
-      try {
-        const result = await this.syncRecent();
-        this.logger.log(`CRM sync: ${result.processed} leads processed (${result.created} new, ${result.updated} updated)`);
-      } catch (err) {
-        this.logger.error(`CRM sync failed: ${err instanceof Error ? err.message : err}`);
-      }
-    });
+    const active = await this.connections.listActive(IntegrationProvider.HPL_CRM);
+    for (const connection of active) {
+      await TenantContext.run({ organizationId: connection.organizationId }, async () => {
+        try {
+          const credentials = this.connections.decrypt<HplCrmCredentials>(connection);
+          const result = await this.syncRecent(credentials);
+          await this.connections.recordSuccess(connection.id);
+          this.logger.log(
+            `CRM sync (org ${connection.organizationId}): ${result.processed} leads processed (${result.created} new, ${result.updated} updated)`,
+          );
+        } catch (err) {
+          await this.connections.recordError(connection.id, this.errorMessage(err));
+          this.logger.error(`CRM sync failed (org ${connection.organizationId}): ${this.errorMessage(err)}`);
+        }
+      });
+    }
   }
 
   /** Pulls leads created in the last `daysBack` days and upserts them. Small, bounded result
    * set per run — not a re-scrape of the full CRM. */
-  async syncRecent(daysBack = 3): Promise<CrmSyncResult> {
-    const baseUrl = this.config.getOrThrow<string>("HPL_CRM_API_BASE_URL");
-    const token = this.config.getOrThrow<string>("HPL_CRM_API_TOKEN");
+  async syncRecent(credentials: HplCrmCredentials, daysBack = 3): Promise<CrmSyncResult> {
     const afterDate = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10);
+    const startUrl = `${credentials.baseUrl}/api/leads/?action=1&page_size=100&created_at_after=${afterDate}`;
+    return this.runSync(startUrl, credentials.token);
+  }
 
-    let url: string | null = `${baseUrl}/api/leads/?action=1&page_size=100&created_at_after=${afterDate}`;
+  /** Walks every page of /api/leads/ with no date filter, upserting everything. Use for the
+   * initial cutover onto this connection, for recovering from a sync outage, or periodically as
+   * a drift backstop — see the class doc for why syncRecent alone can't self-heal that drift. */
+  async fullResync(credentials: HplCrmCredentials): Promise<CrmSyncResult> {
+    const startUrl = `${credentials.baseUrl}/api/leads/?action=1&page_size=100`;
+    return this.runSync(startUrl, credentials.token);
+  }
+
+  private async runSync(startUrl: string, token: string): Promise<CrmSyncResult> {
+    let url: string | null = startUrl;
     let processed = 0;
     let created = 0;
     let updated = 0;
@@ -93,6 +123,10 @@ export class CrmSyncService {
     }
 
     return { processed, created, updated };
+  }
+
+  private errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
   }
 
   private async upsertLead(raw: CrmLeadRaw): Promise<void> {

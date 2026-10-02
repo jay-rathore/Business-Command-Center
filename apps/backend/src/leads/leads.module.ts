@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { IntegrationConnectionsModule } from "../integration-connections/integration-connections.module";
 import { LeadsController } from "./leads.controller";
 import { LeadsService } from "./leads.service";
 import { LeadScoringService } from "./lead-scoring.service";
@@ -10,7 +11,7 @@ import { CrmSyncController } from "./crm-sync/crm-sync.controller";
 import { CrmSyncService } from "./crm-sync/crm-sync.service";
 
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, IntegrationConnectionsModule],
   controllers: [LeadsController, CrmSyncController],
   providers: [
     LeadsService,

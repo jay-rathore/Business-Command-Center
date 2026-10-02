@@ -23,6 +23,7 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
   WOOCOMMERCE: "WooCommerce",
   WHATSAPP: "WhatsApp",
   EMAIL_SMTP: "Email (SMTP)",
+  HPL_CRM: "HPL CRM",
 };
 
 const ALL_PROVIDERS = Object.keys(PROVIDER_LABELS) as IntegrationProvider[];

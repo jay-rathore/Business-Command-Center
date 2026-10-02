@@ -50,3 +50,8 @@ export interface EmailSmtpCredentials {
   fromAddress: string;
   fromName?: string;
 }
+
+export interface HplCrmCredentials {
+  baseUrl: string;
+  token: string;
+}

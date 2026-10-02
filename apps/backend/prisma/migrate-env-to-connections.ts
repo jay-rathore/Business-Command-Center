@@ -138,6 +138,14 @@ async function main() {
         ["host", "port", "secure", "user", "pass", "fromAddress"],
       ),
     },
+    {
+      provider: IntegrationProvider.HPL_CRM,
+      credentials: build(
+        "HPL CRM",
+        { baseUrl: env("HPL_CRM_API_BASE_URL"), token: env("HPL_CRM_API_TOKEN") },
+        ["baseUrl", "token"],
+      ),
+    },
   ];
 
   let migrated = 0;

@@ -55,6 +55,10 @@ const PROVIDER_FIELDS: Record<IntegrationProvider, FieldDef[]> = {
     { key: "fromAddress", label: "From Address" },
     { key: "fromName", label: "From Name (optional)", optional: true },
   ],
+  HPL_CRM: [
+    { key: "baseUrl", label: "CRM Base URL (e.g. https://apiuatcrm.ultracreation.in)" },
+    { key: "token", label: "API Token", type: "password" },
+  ],
 };
 
 const inputClass = "h-8 w-full rounded-sm border border-border bg-surface px-2 text-xs outline-none focus:border-accent";

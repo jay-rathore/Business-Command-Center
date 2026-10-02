@@ -282,6 +282,7 @@ export const IntegrationProvider = {
   WOOCOMMERCE: 'WOOCOMMERCE',
   WHATSAPP: 'WHATSAPP',
   EMAIL_SMTP: 'EMAIL_SMTP',
+  HPL_CRM: 'HPL_CRM',
 } as const;
 export type IntegrationProvider = (typeof IntegrationProvider)[keyof typeof IntegrationProvider];
 
