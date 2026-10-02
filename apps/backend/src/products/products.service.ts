@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { OrderStatus, Prisma } from "@prisma/client";
 import {
   CategoryBreakdownEntry,
   DemandTier,
@@ -28,6 +28,9 @@ interface ProductPerfStats {
 }
 
 type ProductWithRelations = Prisma.ProductGetPayload<{ include: { category: true; shade: true } }>;
+
+// Cancelled orders are not sales — every other module (Sales, Dealers, Customers…) excludes them.
+const NOT_CANCELLED: Prisma.OrderWhereInput = { status: { not: OrderStatus.CANCELLED } };
 
 @Injectable()
 export class ProductsService {
@@ -110,7 +113,6 @@ export class ProductsService {
     const stats = await this.getPerformanceStats(products.map((p) => p.id), dateFrom, dateTo);
 
     let unitsSold = 0;
-    let totalOrders = 0;
     let totalRevenue = 0;
     let growthSum = 0;
     let growthCount = 0;
@@ -121,7 +123,6 @@ export class ProductsService {
     for (const p of products) {
       const s = stats.get(p.id) ?? { units: 0, orders: 0, revenue: 0, growth: null };
       unitsSold += s.units;
-      totalOrders += s.orders;
       totalRevenue += s.revenue;
       if (s.growth !== null) {
         growthSum += s.growth;
@@ -131,6 +132,11 @@ export class ProductsService {
       if (p.design) byDesign.set(p.design, (byDesign.get(p.design) ?? 0) + s.revenue);
       byCategory.set(p.category.name, (byCategory.get(p.category.name) ?? 0) + s.units);
     }
+
+    // Distinct orders — summing per-product counts would count a multi-product order once per product.
+    const totalOrders = await this.prisma.order.count({
+      where: { ...NOT_CANCELLED, ...dateRangeWhere("orderDate", dateFrom, dateTo), items: { some: { productId: { in: products.map((p) => p.id) } } } },
+    });
 
     return {
       totalSkus: products.length,
@@ -249,9 +255,7 @@ export class ProductsService {
     // "Lifetime" totals become range-scoped once a range is supplied — omitting dateFrom/dateTo
     // keeps the true lifetime aggregate this method returned before.
     const rangeFilter = dateRangeWhere("orderDate", dateFrom, dateTo);
-    const lifetimeWhere = Object.keys(rangeFilter).length
-      ? { productId: { in: productIds }, order: { is: rangeFilter } }
-      : { productId: { in: productIds } };
+    const lifetimeWhere = { productId: { in: productIds }, order: { is: { ...NOT_CANCELLED, ...rangeFilter } } };
 
     const [lifetime, currentWindow, previousWindow] = await Promise.all([
       this.prisma.orderItem.groupBy({
@@ -262,12 +266,12 @@ export class ProductsService {
       }),
       this.prisma.orderItem.groupBy({
         by: ["productId"],
-        where: { productId: { in: productIds }, order: { orderDate: currentOrderDate } },
+        where: { productId: { in: productIds }, order: { ...NOT_CANCELLED, orderDate: currentOrderDate } },
         _sum: { lineTotal: true },
       }),
       this.prisma.orderItem.groupBy({
         by: ["productId"],
-        where: { productId: { in: productIds }, order: { orderDate: previousOrderDate } },
+        where: { productId: { in: productIds }, order: { ...NOT_CANCELLED, orderDate: previousOrderDate } },
         _sum: { lineTotal: true },
       }),
     ]);
@@ -293,7 +297,7 @@ export class ProductsService {
 
   private async getDemandByStateForProduct(productId: string): Promise<ProductStateDemand[]> {
     const rows = await this.prisma.orderItem.findMany({
-      where: { productId },
+      where: { productId, order: { is: NOT_CANCELLED } },
       select: { quantity: true, order: { select: { state: true } } },
     });
 

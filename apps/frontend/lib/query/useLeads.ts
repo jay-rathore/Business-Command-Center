@@ -9,6 +9,8 @@ import {
   FunnelStage,
   LeadDetail,
   LeadListItem,
+  LeadOutcomes,
+  LeadSourcePerformance,
   LeadsKpis,
   LeadStatusOption,
   LeadTypeOption,
@@ -19,21 +21,23 @@ import { api } from "../api/apiClient";
 import { appendDateRange, DateRange } from "../dateRange";
 import { TableState } from "@/hooks/useTableState";
 
-function buildQuery(state: TableState & { statusId?: string } & DateRange): string {
+function buildQuery(state: TableState & { statusId?: string; sourceId?: string } & DateRange): string {
   const params = new URLSearchParams();
   params.set("page", String(state.page));
   params.set("pageSize", String(state.pageSize));
   if (state.sortBy) params.set("sortBy", state.sortBy);
   params.set("sortDir", state.sortDir);
   if (state.q) params.set("q", state.q);
-  if (state.statusId) params.set("statusId", state.statusId);
+  if (state.sourceId) params.set("sourceId", state.sourceId);
+  if (state.statusId?.startsWith("stage:")) params.set("stage", state.statusId.slice(6));
+  else if (state.statusId) params.set("statusId", state.statusId);
   if (state.dateFrom) params.set("dateFrom", state.dateFrom);
   if (state.dateTo) params.set("dateTo", state.dateTo);
   return params.toString();
 }
 
 export function useLeadsList(
-  state: TableState & { statusId?: string } & DateRange,
+  state: TableState & { statusId?: string; sourceId?: string } & DateRange,
   initialData?: PaginatedResponse<LeadListItem>,
 ) {
   return useQuery({
@@ -41,7 +45,21 @@ export function useLeadsList(
     queryFn: () => api.get<PaginatedResponse<LeadListItem>>(`/api/leads?${buildQuery(state)}`),
     placeholderData: (prev) => prev,
     initialData:
-      state.page === 1 && !state.sortBy && !state.q && !state.statusId && !state.dateFrom && !state.dateTo ? initialData : undefined,
+      state.page === 1 && !state.sortBy && !state.q && !state.statusId && !state.sourceId && !state.dateFrom && !state.dateTo ? initialData : undefined,
+  });
+}
+
+export function useLeadsOutcomes(range: DateRange = {}) {
+  return useQuery({
+    queryKey: ["leads", "outcomes", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<LeadOutcomes>(appendDateRange("/api/leads/outcomes", range)),
+  });
+}
+
+export function useLeadsSourcePerformance(range: DateRange = {}) {
+  return useQuery({
+    queryKey: ["leads", "source-performance", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<LeadSourcePerformance>(appendDateRange("/api/leads/source-performance", range)),
   });
 }
 

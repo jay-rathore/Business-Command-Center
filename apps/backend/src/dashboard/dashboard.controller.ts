@@ -2,6 +2,8 @@ import { Controller, Get, Query } from "@nestjs/common";
 import type { ContributorTab } from "@hpl/shared";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
 import { DateRangeQueryDto } from "../common/dto/date-range-query.dto";
+import { TrendQueryDto } from "../sales/dto/sales-query.dto";
+import { SalesService } from "../sales/sales.service";
 import { DashboardService } from "./dashboard.service";
 import { BusinessHealthService } from "./business-health.service";
 import { AttentionFeedService } from "./attention-feed.service";
@@ -15,11 +17,19 @@ export class DashboardController {
     private readonly businessHealth: BusinessHealthService,
     private readonly attentionFeed: AttentionFeedService,
     private readonly contributors: ContributorsService,
+    private readonly salesService: SalesService,
   ) {}
 
   @Get("summary")
   getSummary(@Query() query: DateRangeQueryDto) {
     return this.dashboardService.getSummary(query.dateFrom, query.dateTo);
+  }
+
+  // The dashboard is readable by every role, but /sales/revenue-trend needs sales:read — so the
+  // dashboard's own trend chart gets its own dashboard:read-gated route over the same data.
+  @Get("revenue-trend")
+  getRevenueTrend(@Query() query: TrendQueryDto) {
+    return this.salesService.getRevenueTrend(query.granularity, query.dateFrom, query.dateTo);
   }
 
   @Get("business-health")

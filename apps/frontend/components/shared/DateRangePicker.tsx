@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { CalendarRange, ChevronDown } from "lucide-react";
 import { endOfMonth, format, startOfMonth, subDays, subMonths } from "date-fns";
 import { useDateRangeParams } from "@/hooks/useDateRangeParams";
+import { ALL_TIME_FROM, isDateAwareRoute } from "@/lib/dateRange";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,13 +13,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-// Only these pages have period-scoped data (KPIs/trends/breakdowns) — everywhere else the
-// picker would be inert, so it renders as nothing rather than a dead control. Projects is
-// deliberately excluded: its KPIs/Kanban/watchlist are a live pipeline snapshot with no date
-// dimension, only its "All Projects" table would react, so showing the picker there would look
-// broken (most of the page staying frozen while one table changes).
-const DATE_AWARE_ROUTES = ["/dashboard", "/marketing", "/sales", "/leads", "/customers", "/dealers", "/products"];
 
 function toDateKey(date: Date): string {
   return format(date, "yyyy-MM-dd");
@@ -28,16 +22,6 @@ interface Preset {
   label: string;
   range: () => { dateFrom: string; dateTo: string };
 }
-
-// Deliberately an explicit wide range, not {} (cleared params) — every backend endpoint decides
-// what "no range given" means for itself, and that's inconsistent: overview/KPI endpoints (e.g.
-// SalesService.getOverview) default an absent range to the current month, while breakdown/table
-// endpoints (dateRangeWhere-based) treat it as genuinely unrestricted. Sending an explicit range
-// this old forces every endpoint through its normal explicit-range math instead, so "All time"
-// actually means all time everywhere, consistently — see the bug this fixed: a KPI card showing
-// less revenue for "All time" than for "Last 7 days" because "All time" was silently only
-// current-month data.
-const ALL_TIME_FROM = "2000-01-01";
 
 const PRESETS: Preset[] = [
   {
@@ -73,10 +57,9 @@ export function DateRangePicker() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
-  const isDateAware = DATE_AWARE_ROUTES.some((route) => pathname === route || pathname.startsWith(`${route}/`));
-  if (!isDateAware) return null;
+  if (!isDateAwareRoute(pathname)) return null;
 
-  const isAllTime = dateFrom === ALL_TIME_FROM && dateTo === toDateKey(new Date());
+  const isAllTime = dateFrom === ALL_TIME_FROM;
   const activePreset = dateFrom && dateTo ? PRESETS.find((p) => { const r = p.range(); return r.dateFrom === dateFrom && r.dateTo === dateTo; }) : undefined;
   const label = !dateFrom && !dateTo ? "All time" : isAllTime ? "All time" : activePreset ? activePreset.label : `${dateFrom} – ${dateTo}`;
 

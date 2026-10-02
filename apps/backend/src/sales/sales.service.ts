@@ -135,7 +135,7 @@ export class SalesService {
     const orderDateFilter = dateRangeWhere("orderDate", dateFrom, dateTo);
     const rows = await this.prisma.orderItem.groupBy({
       by: ["productId"],
-      where: Object.keys(orderDateFilter).length ? { order: { is: orderDateFilter } } : undefined,
+      where: { order: { is: { ...NOT_CANCELLED, ...orderDateFilter } } },
       _sum: { lineTotal: true, quantity: true },
       orderBy: { _sum: { lineTotal: "desc" } },
       take: 10,
@@ -227,7 +227,7 @@ export class SalesService {
   }
 
   async getProductTable(query: SalesTableQueryDto): Promise<PaginatedResponse<SalesTableRow>> {
-    const { page, pageSize, sortBy, sortDir, q } = query;
+    const { page, pageSize, sortBy, sortDir, q, dateFrom, dateTo } = query;
 
     const products = await this.prisma.product.findMany({
       where: q
@@ -238,6 +238,7 @@ export class SalesService {
 
     const itemAgg = await this.prisma.orderItem.groupBy({
       by: ["productId"],
+      where: { order: { is: { ...NOT_CANCELLED, ...dateRangeWhere("orderDate", dateFrom, dateTo) } } },
       _sum: { quantity: true, lineTotal: true },
       _count: { _all: true },
     });
@@ -294,12 +295,12 @@ export class SalesService {
     const [currentWindow, previousWindow] = await Promise.all([
       this.prisma.orderItem.groupBy({
         by: ["productId"],
-        where: { productId: { in: productIds }, order: { orderDate: { gte: currentStart } } },
+        where: { productId: { in: productIds }, order: { ...NOT_CANCELLED, orderDate: { gte: currentStart } } },
         _sum: { lineTotal: true },
       }),
       this.prisma.orderItem.groupBy({
         by: ["productId"],
-        where: { productId: { in: productIds }, order: { orderDate: { gte: previousStart, lt: currentStart } } },
+        where: { productId: { in: productIds }, order: { ...NOT_CANCELLED, orderDate: { gte: previousStart, lt: currentStart } } },
         _sum: { lineTotal: true },
       }),
     ]);

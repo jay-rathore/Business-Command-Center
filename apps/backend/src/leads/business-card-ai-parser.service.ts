@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, Logger } from "@nestjs/common";
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
 import { BusinessCardDraft } from "@hpl/shared";
@@ -63,7 +63,7 @@ export class BusinessCardAiParserService {
 
   async parse(imageDataUrl: string): Promise<BusinessCardDraft> {
     if (!/^data:image\/(png|jpe?g|webp);base64,/.test(imageDataUrl)) {
-      throw new InternalServerErrorException("Invalid image data");
+      throw new BadRequestException("Invalid image data — expected a PNG, JPEG or WebP data URL");
     }
 
     const model = this.config.get<string>("OPENAI_MODEL") ?? "gpt-4o";

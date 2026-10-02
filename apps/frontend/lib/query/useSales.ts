@@ -47,10 +47,10 @@ function buildTableQuery(state: TableState): string {
   return params.toString();
 }
 
-export function useSalesTable(state: TableState) {
+export function useSalesTable(state: TableState, range: DateRange = {}) {
   return useQuery({
-    queryKey: ["sales", "table", state],
-    queryFn: () => api.get<PaginatedResponse<SalesTableRow>>(`/api/sales/table?${buildTableQuery(state)}`),
+    queryKey: ["sales", "table", state, range.dateFrom, range.dateTo],
+    queryFn: () => api.get<PaginatedResponse<SalesTableRow>>(appendDateRange(`/api/sales/table?${buildTableQuery(state)}`, range)),
     placeholderData: (prev) => prev,
   });
 }

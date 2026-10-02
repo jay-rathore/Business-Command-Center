@@ -42,7 +42,7 @@ const EXTRACT_TOOL_SCHEMA = {
               quantity: { type: "integer", minimum: 1 },
               unitRate: {
                 type: ["number", "null"],
-                description: "Rate per unit. If a catalog item was clearly matched, use its unitPrice. Null if unknown.",
+                description: "Rate per unit. If the text states a rate for this item, use exactly that — never replace it with the catalog price. Otherwise, if a catalog item was clearly matched, use its unitPrice. Null if unknown.",
               },
               taxPercent: { type: "number", default: 18 },
               matchedProductSku: { type: ["string", "null"], description: "SKU from the catalog if this line clearly matches one" },
@@ -119,7 +119,8 @@ city: ${ctx.lead.city}
 state: ${ctx.lead.state}
 
 Product catalog (sku | name | category | shade | unit price) — match items mentioned in the text
-to a real SKU/price when clearly matched; otherwise leave unitRate null and matchedProductSku null:
+to a real SKU when clearly matched; otherwise leave matchedProductSku null. A rate stated in the text always wins
+over the catalog unit price; use the catalog price only when the text gives no rate (else leave unitRate null):
 ${catalogLines}
 
 Always call the extract_quotation tool with your best structured extraction.`;
@@ -158,7 +159,7 @@ Always call the extract_quotation tool with your best structured extraction.`;
     return {
       customer: {
         name: extracted.customer.name,
-        company: extracted.customer.company ?? null,
+        company: extracted.customer.company?.trim().replace(/^-$/, "") || null, // "-" is the prompt's placeholder for "no company"
         address: extracted.customer.address,
         city: extracted.customer.city,
         state: extracted.customer.state,

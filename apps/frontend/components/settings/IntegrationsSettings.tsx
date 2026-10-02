@@ -88,8 +88,8 @@ export function IntegrationsSettings() {
             );
           }
           return (
-            <div key={provider} className="flex items-center justify-between gap-3 rounded-sm border border-border p-3 text-xs">
-              <div className="flex flex-col gap-0.5">
+            <div key={provider} className="flex flex-wrap items-center justify-between gap-3 rounded-sm border border-border p-3 text-xs">
+              <div className="flex min-w-0 flex-col gap-0.5 break-words">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-text-primary">{PROVIDER_LABELS[provider]}</span>
                   <StatusBadge connection={connection} />
@@ -102,7 +102,7 @@ export function IntegrationsSettings() {
                   <span className={triggerSync.isError ? "text-critical" : "text-good"}>{syncMessage.text}</span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {connection?.isActive && isSyncableProvider(provider) && (
                   <Button
                     type="button"

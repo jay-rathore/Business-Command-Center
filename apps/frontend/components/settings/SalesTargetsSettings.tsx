@@ -73,8 +73,8 @@ export function SalesTargetsSettings() {
             />
           ) : (
             <div key={target.id} className="flex items-center justify-between gap-3 rounded-sm border border-border p-3 text-xs">
-              <div className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="rounded-full bg-accent-tint px-2 py-0.5 text-[10px] font-medium text-accent-strong">
                     {SCOPE_LABEL[target.scope]}
                   </span>

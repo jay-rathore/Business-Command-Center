@@ -33,4 +33,12 @@ export class SalesTableQueryDto extends ListQueryDto {
   @IsOptional()
   @IsIn(["sku", "name", "category", "units", "orders", "revenue", "growth", "contributionPct"])
   declare sortBy?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 }

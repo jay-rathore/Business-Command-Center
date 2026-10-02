@@ -13,6 +13,16 @@ export class LeadsListQueryDto extends ListQueryDto {
   @IsIn(["name", "company", "createdAt", "nextFollowUpAt", "score", "estimatedValue"])
   declare sortBy?: string;
 
+  // Leads that came from this source (a lead can have several).
+  @IsOptional()
+  @IsString()
+  sourceId?: string;
+
+  // Filters to every status in a stage (e.g. all lost leads), independent of statusId.
+  @IsOptional()
+  @IsIn(["OPEN", "WON", "LOST"])
+  stage?: "OPEN" | "WON" | "LOST";
+
   @IsOptional()
   @IsDateString()
   dateFrom?: string;

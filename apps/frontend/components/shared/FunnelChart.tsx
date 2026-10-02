@@ -13,17 +13,21 @@ export function FunnelChart({ stages }: { stages: FunnelStageDatum[] }) {
         const dropOffPct = prevCount && prevCount > 0 ? ((prevCount - stage.count) / prevCount) * 100 : null;
         return (
           <div key={stage.label} className="flex items-center gap-3">
-            <span className="w-24 shrink-0 text-xs text-text-secondary">{stage.label}</span>
+            <span className="w-28 shrink-0 text-xs text-text-secondary">{stage.label}</span>
             <div className="h-7 flex-1 rounded-sm bg-surface-2">
-              <div
-                className="flex h-full items-center rounded-sm bg-accent px-2 text-xs font-medium text-white transition-all"
-                style={{ width: `${widthPct}%` }}
-              >
-                {stage.count}
+              {/* Narrow bars can't hold their number — put it beside the bar instead of clipping it. */}
+              <div className="flex h-full items-center gap-2">
+                <div
+                  className="flex h-full items-center rounded-sm bg-accent px-2 text-xs font-medium text-white transition-all"
+                  style={{ width: `${widthPct}%` }}
+                >
+                  {widthPct >= 18 && stage.count.toLocaleString("en-IN")}
+                </div>
+                {widthPct < 18 && <span className="text-xs font-medium text-text-primary">{stage.count.toLocaleString("en-IN")}</span>}
               </div>
             </div>
             <span className="w-16 shrink-0 text-right text-[11px] text-text-muted">
-              {dropOffPct !== null ? `-${dropOffPct.toFixed(0)}%` : ""}
+              {dropOffPct !== null && dropOffPct >= 0.5 ? `-${dropOffPct.toFixed(0)}%` : ""}
             </span>
           </div>
         );

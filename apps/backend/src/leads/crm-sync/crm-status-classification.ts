@@ -54,6 +54,26 @@ export const CRM_STATUS_CLASSIFICATION: Record<string, { stage: LeadStage; sortO
   Jan: { stage: "OPEN", sortOrder: 5 },
 };
 
+/** Statuses that exist in the CRM but are not part of the sales pipeline: the hiring statuses staff
+ * sometimes mis-apply to sales leads (the CRM tags only some copies of them as department "Hr", and a
+ * lead's own status carries no department, so the department check can't catch them) and data-entry
+ * junk. The leads keep their status and still count in totals — the status is just hidden from the
+ * funnel and from the status pickers (LeadStatus.isActive = false). */
+export const HIDDEN_STATUS_NAMES = new Set(["Applied", "Screening", "Offer Sent", "Rejected", "Hired", "Fd", "Dsf", "H", "Jan"]);
+
+/** The funnel groups the pipeline statuses into stages by sortOrder tier. A lead's position is its
+ * CURRENT status (the CRM keeps no status history), so each bar reads "leads now at this stage or
+ * later". Statuses in the same tier are one stage — their relative order is not meaningful. */
+export const FUNNEL_STAGES: { label: string; sortOrders: number[] }[] = [
+  { label: "New", sortOrders: [10, 15] },
+  { label: "Contacted", sortOrders: [20, 30] },
+  { label: "Call attempted", sortOrders: [35] },
+  { label: "Follow-up", sortOrders: [45, 50] },
+  { label: "Interested", sortOrders: [55, 60] },
+  { label: "Qualified", sortOrders: [65] },
+  { label: "Won", sortOrders: [100] },
+];
+
 /** HR-department statuses (Offer Sent/Rejected/Hired) belong to hiring, not the leads pipeline. */
 export const CRM_STATUS_EXCLUDED_DEPARTMENTS = new Set(["Hr"]);
 

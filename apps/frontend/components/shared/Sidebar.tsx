@@ -32,6 +32,7 @@ import {
 import { cn, initials } from "@/lib/utils";
 import { useUiStore } from "@/lib/stores/uiStore";
 import { useAuthUser } from "@/lib/auth/AuthUserContext";
+import { canAccess } from "@/lib/auth/route-access";
 
 const NAV_ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
@@ -97,7 +98,7 @@ export function Sidebar() {
 
         <nav className="flex-1 overflow-y-auto px-2 py-3">
           <ul className="flex flex-col gap-0.5">
-            {NAV_MODULES.map((mod) => {
+            {NAV_MODULES.filter((mod) => canAccess(user, mod.route)).map((mod) => {
               const Icon = NAV_ICONS[mod.key] ?? LayoutDashboard;
               const isActive = pathname === mod.route || pathname.startsWith(`${mod.route}/`);
               const isComingSoon = mod.phase > 1;

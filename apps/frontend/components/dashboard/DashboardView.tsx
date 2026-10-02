@@ -10,8 +10,7 @@ import {
   ContributorTab,
   DashboardSummary,
 } from "@hpl/shared";
-import { useAiSummary, useAttentionFeed, useBusinessHealth, useContributors, useDashboardSummary } from "@/lib/query/useDashboard";
-import { useSalesRevenueTrend } from "@/lib/query/useSales";
+import { useAiSummary, useAttentionFeed, useBusinessHealth, useContributors, useDashboardRevenueTrend, useDashboardSummary } from "@/lib/query/useDashboard";
 import { useDateRangeParams } from "@/hooks/useDateRangeParams";
 import { KpiCard } from "@/components/shared/KpiCard";
 import { RevenueTrendChart } from "@/components/shared/RevenueTrendChart";
@@ -50,7 +49,7 @@ export function DashboardView({
   const { dateFrom, dateTo } = useDateRangeParams();
 
   const summaryQuery = useDashboardSummary({ dateFrom, dateTo }, initialSummary ?? undefined);
-  const trendQuery = useSalesRevenueTrend("monthly", { dateFrom, dateTo });
+  const trendQuery = useDashboardRevenueTrend({ dateFrom, dateTo });
   const healthQuery = useBusinessHealth(initialHealth ?? undefined);
   const attentionQuery = useAttentionFeed(initialAttention ?? undefined);
   const contributorsQuery = useContributors(contributorTab);

@@ -26,6 +26,10 @@ export class EmailService {
       port: credentials.port,
       secure: credentials.secure,
       auth: { user: credentials.user, pass: credentials.pass },
+      // Without these a stalled SMTP server holds the HTTP request for minutes (nodemailer defaults: 2 min / 10 min).
+      connectionTimeout: 20_000,
+      greetingTimeout: 20_000,
+      socketTimeout: 45_000,
     });
     const fromName = credentials.fromName ?? credentials.fromAddress;
 

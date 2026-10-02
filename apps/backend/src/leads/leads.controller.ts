@@ -28,9 +28,19 @@ export class LeadsController {
     return this.leadsService.getFunnel(query.dateFrom, query.dateTo);
   }
 
+  @Get("outcomes")
+  getOutcomes(@Query() query: DateRangeQueryDto) {
+    return this.leadsService.getOutcomes(query.dateFrom, query.dateTo);
+  }
+
   @Get("sources")
   getSourceBreakdown(@Query() query: DateRangeQueryDto) {
     return this.leadsService.getSourceBreakdown(query.dateFrom, query.dateTo);
+  }
+
+  @Get("source-performance")
+  getSourcePerformance(@Query() query: DateRangeQueryDto) {
+    return this.leadsService.getSourcePerformance(query.dateFrom, query.dateTo);
   }
 
   @Get("statuses")

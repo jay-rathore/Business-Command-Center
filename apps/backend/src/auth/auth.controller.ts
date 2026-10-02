@@ -20,6 +20,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 const ACCESS_COOKIE = 'access_token';
 const REFRESH_COOKIE = 'refresh_token';
+// Readable by the frontend gate (path '/'), unlike the refresh cookie (path '/api/auth'): it only says
+// "a refresh token probably exists", so an expired access cookie can be silently renewed instead of
+// bouncing the user to /login. Carries no secret.
+const SESSION_HINT_COOKIE = 'session_hint';
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -55,6 +59,7 @@ export class AuthController {
       maxAge: THIRTY_DAYS_MS,
       path: '/api/auth',
     });
+    res.cookie(SESSION_HINT_COOKIE, '1', { httpOnly: true, secure, sameSite: 'lax', maxAge: THIRTY_DAYS_MS, path: '/' });
   }
 
   @Public()
@@ -102,6 +107,7 @@ export class AuthController {
     await this.authService.logout(userId);
     res.clearCookie(ACCESS_COOKIE, { path: '/' });
     res.clearCookie(REFRESH_COOKIE, { path: '/api/auth' });
+    res.clearCookie(SESSION_HINT_COOKIE, { path: '/' });
     return { success: true };
   }
 

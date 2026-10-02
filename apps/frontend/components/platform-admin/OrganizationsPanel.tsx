@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { OrganizationSummary, ResetAdminPasswordResponse } from "@hpl/shared";
+import { CreateOrganizationResponse, OrganizationSummary, ResetAdminPasswordResponse } from "@hpl/shared";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ export function OrganizationsPanel() {
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [resettingOrg, setResettingOrg] = useState<OrganizationSummary | null>(null);
+  const [createResult, setCreateResult] = useState<CreateOrganizationResponse | null>(null);
   const [resetResult, setResetResult] = useState<ResetAdminPasswordResponse | null>(null);
 
   return (
@@ -35,7 +36,14 @@ export function OrganizationsPanel() {
         )}
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {creating && <CreateOrganizationForm onCreated={() => setCreating(false)} />}
+        {creating && (
+          <CreateOrganizationForm
+            onCreated={(result) => {
+              setCreating(false);
+              setCreateResult(result);
+            }}
+          />
+        )}
 
         {organizations.data?.map((org: OrganizationSummary) => {
           const isOwnOrg = org.id === currentUser.organizationId;
@@ -93,6 +101,16 @@ export function OrganizationsPanel() {
             setResettingOrg(null);
             setResetResult(result);
           }}
+        />
+      )}
+
+      {createResult && (
+        <TemporaryPasswordDialog
+          open={!!createResult}
+          onOpenChange={(open) => !open && setCreateResult(null)}
+          title={`${createResult.organization.name} created`}
+          adminEmail={createResult.adminEmail}
+          temporaryPassword={createResult.temporaryPassword}
         />
       )}
 

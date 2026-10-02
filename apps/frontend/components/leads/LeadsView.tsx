@@ -7,7 +7,7 @@ import { FunnelStage, LeadListItem, LeadsKpis, PaginatedResponse } from "@hpl/sh
 import { useTableState } from "@/hooks/useTableState";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useDateRangeParams } from "@/hooks/useDateRangeParams";
-import { useLeadStatuses, useLeadsFunnel, useLeadsKpis, useLeadsList, useLeadsSources } from "@/lib/query/useLeads";
+import { useLeadStatuses, useLeadsFunnel, useLeadsKpis, useLeadsList, useLeadsOutcomes, useLeadsSourcePerformance, useLeadsSources } from "@/lib/query/useLeads";
 import { useDrawerStore } from "@/lib/stores/drawerStore";
 import { DataTable } from "@/components/shared/DataTable";
 import { KpiCard } from "@/components/shared/KpiCard";
@@ -16,6 +16,8 @@ import { RankedBarList } from "@/components/shared/RankedBarList";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LeadStatusBadge } from "./LeadStatusBadge";
+import { LeadOutcomesCard } from "./LeadOutcomesCard";
+import { SourcePerformanceCard } from "./SourcePerformanceCard";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 
 export function LeadsView({
@@ -29,6 +31,7 @@ export function LeadsView({
 }) {
   const { state, setPage, setSort, setQuery } = useTableState({ pageSize: 10, sortBy: "createdAt" });
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [sourceFilter, setSourceFilter] = useState<string | undefined>(undefined);
   const debouncedQuery = useDebounce(state.q);
   const openDrawer = useDrawerStore((s) => s.open);
   const { dateFrom, dateTo } = useDateRangeParams();
@@ -37,8 +40,10 @@ export function LeadsView({
   const kpisQuery = useLeadsKpis(range, initialKpis ?? undefined);
   const funnelQuery = useLeadsFunnel(range, initialFunnel ?? undefined);
   const sourcesQuery = useLeadsSources(range);
+  const outcomesQuery = useLeadsOutcomes(range);
+  const sourcePerfQuery = useLeadsSourcePerformance(range);
   const statusesQuery = useLeadStatuses();
-  const listQuery = useLeadsList({ ...state, q: debouncedQuery, statusId: statusFilter, ...range }, initialList ?? undefined);
+  const listQuery = useLeadsList({ ...state, q: debouncedQuery, statusId: statusFilter, sourceId: sourceFilter, ...range }, initialList ?? undefined);
 
   const kpis = kpisQuery.data;
   const sorting: SortingState = state.sortBy ? [{ id: state.sortBy, desc: state.sortDir === "desc" }] : [];
@@ -92,6 +97,26 @@ export function LeadsView({
         <KpiCard label="Conversion Rate" value={kpis ? formatPercent(kpis.conversionRate) : "—"} icon={TrendingUp} />
       </div>
 
+      <LeadOutcomesCard
+        outcomes={outcomesQuery.data}
+        isLoading={outcomesQuery.isLoading}
+        onViewStage={(stage) => {
+          setStatusFilter(`stage:${stage}`);
+          setPage(1);
+          document.getElementById("all-leads")?.scrollIntoView({ behavior: "smooth" });
+        }}
+      />
+
+      <SourcePerformanceCard
+        data={sourcePerfQuery.data}
+        isLoading={sourcePerfQuery.isLoading}
+        onViewSource={(sourceId) => {
+          setSourceFilter(sourceId);
+          setPage(1);
+          document.getElementById("all-leads")?.scrollIntoView({ behavior: "smooth" });
+        }}
+      />
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -126,7 +151,7 @@ export function LeadsView({
         </Card>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div id="all-leads" className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold text-text-primary">All Leads</h2>
         </div>
@@ -139,11 +164,32 @@ export function LeadsView({
           className="h-8 w-fit rounded-sm border border-border bg-surface px-2 text-xs outline-none focus:border-accent"
         >
           <option value="ALL">All statuses</option>
+          <option value="stage:LOST">All lost leads</option>
+          <option value="stage:WON">All won leads</option>
           {(statusesQuery.data ?? []).map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
             </option>
           ))}
+        </select>
+
+        <select
+          value={sourceFilter ?? "ALL"}
+          onChange={(e) => {
+            setSourceFilter(e.target.value === "ALL" ? undefined : e.target.value);
+            setPage(1);
+          }}
+          className="h-8 w-fit rounded-sm border border-border bg-surface px-2 text-xs outline-none focus:border-accent"
+          aria-label="Filter by source"
+        >
+          <option value="ALL">All sources</option>
+          {(sourcePerfQuery.data?.sources ?? [])
+            .filter((src) => src.sourceId)
+            .map((src) => (
+              <option key={src.sourceId} value={src.sourceId!}>
+                {src.source}
+              </option>
+            ))}
         </select>
 
         <DataTable

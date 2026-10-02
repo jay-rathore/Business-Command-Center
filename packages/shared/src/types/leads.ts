@@ -55,6 +55,62 @@ export interface LeadDetail extends LeadListItem {
   activities: LeadActivityItem[];
 }
 
+export interface LeadOutcomeBucket {
+  key: string;
+  label: string;
+  count: number;
+  pctOfTotal: number;
+  /** Set on the Won / Lost buckets so the UI can filter the leads table to them. */
+  stage?: "WON" | "LOST";
+  /** The CRM statuses inside this bucket (for Lost these are the lost reasons), biggest first. */
+  statuses: { name: string; count: number }[];
+}
+
+export interface LeadOutcomeRate {
+  key: string;
+  label: string;
+  /** Percent, 0-100; null when the denominator is 0. */
+  value: number | null;
+  description: string;
+}
+
+export interface LeadOutcomes {
+  total: number;
+  /** Mutually exclusive — the counts add up to `total`. */
+  buckets: LeadOutcomeBucket[];
+  rates: LeadOutcomeRate[];
+}
+
+export type SourceRating = "strong" | "average" | "weak" | "low_volume" | "unworked";
+
+export interface LeadSourcePerformanceRow {
+  source: string;
+  /** null for the "No source recorded" row. */
+  sourceId: string | null;
+  /** A lead with several sources counts once under each, so rows can add up to more than the total. */
+  leads: number;
+  worked: number;
+  /** Interested + Qualified + Won. */
+  interested: number;
+  won: number;
+  lost: number;
+  contactRate: number | null;
+  interestRate: number | null;
+  lostRate: number | null;
+  /** Won / (Won + Lost). */
+  winRate: number | null;
+  topLostReason: string | null;
+  rating: SourceRating;
+}
+
+export interface LeadSourcePerformance {
+  /** Whole-pipeline rates the ratings are judged against. */
+  baseline: { contactRate: number | null; interestRate: number | null; lostRate: number | null; winRate: number | null };
+  /** Sources with fewer leads than this are rated "low_volume" instead of strong/weak. */
+  minLeads: number;
+  sources: LeadSourcePerformanceRow[];
+}
+
 export interface LeadsKpis {
   totalLeads: number;
   newThisMonth: number;
@@ -66,9 +122,11 @@ export interface LeadsKpis {
 }
 
 export interface FunnelStage {
-  stage: LeadStatusOption;
   label: string;
+  /** Leads currently at this stage or any later one (plus, for the first bar, every lead in range). */
   count: number;
+  /** The CRM status names grouped into this stage — empty for the "All leads" bar. */
+  statuses: string[];
 }
 
 export interface SourceBreakdownEntry {

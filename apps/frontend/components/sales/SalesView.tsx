@@ -48,7 +48,7 @@ export function SalesView({
   const overviewQuery = useSalesOverview(range, initialOverview ?? undefined);
   const trendQuery = useSalesRevenueTrend(granularity, range, initialTrend ?? undefined);
   const breakdownQuery = useSalesBreakdown(breakdownTab, range);
-  const tableQuery = useSalesTable({ ...state, q: debouncedQuery });
+  const tableQuery = useSalesTable({ ...state, q: debouncedQuery }, { dateFrom, dateTo });
 
   const overview = overviewQuery.data;
   const sorting: SortingState = state.sortBy ? [{ id: state.sortBy, desc: state.sortDir === "desc" }] : [];

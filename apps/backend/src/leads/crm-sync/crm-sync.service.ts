@@ -8,7 +8,7 @@ import { IntegrationConnectionsService } from "../../integration-connections/int
 import type { HplCrmCredentials } from "../../integration-connections/credential-types";
 import { NotificationsService } from "../../notifications/notifications.service";
 import { computeLeadScore } from "../lead-scoring.util";
-import { classifyStatusName, CRM_STATUS_EXCLUDED_DEPARTMENTS } from "./crm-status-classification";
+import { classifyStatusName, HIDDEN_STATUS_NAMES, CRM_STATUS_EXCLUDED_DEPARTMENTS } from "./crm-status-classification";
 import { CrmLeadRaw, CrmLookupRow, mapCrmLead, mapCrmRep } from "./crm-lead-mapper";
 
 // ₹20L — same "high-value" framing AttentionFeedService/NotificationsService use elsewhere.
@@ -102,6 +102,9 @@ export class CrmSyncService {
     let processed = 0;
     let created = 0;
     let updated = 0;
+
+    // Keep non-pipeline statuses hidden even when no lead carrying them is in this run's window.
+    await this.prisma.leadStatus.updateMany({ where: { name: { in: [...HIDDEN_STATUS_NAMES] }, isActive: true }, data: { isActive: false } });
 
     while (url) {
       const res = await fetch(url, { headers: { Authorization: `Token ${token}` } });
@@ -224,7 +227,11 @@ export class CrmSyncService {
     if (!row) row = await this.prisma.leadStatus.findUnique({ where: { organizationId_name: { organizationId, name: detail.name } } });
     if (!row) {
       const { stage, sortOrder } = classifyStatusName(detail.name);
-      row = await this.prisma.leadStatus.create({ data: { organizationId, crmId: detail.id, name: detail.name, stage, sortOrder } });
+      row = await this.prisma.leadStatus.create({
+        data: { organizationId, crmId: detail.id, name: detail.name, stage, sortOrder, isActive: !HIDDEN_STATUS_NAMES.has(detail.name) },
+      });
+    } else if (row.isActive && HIDDEN_STATUS_NAMES.has(row.name)) {
+      row = await this.prisma.leadStatus.update({ where: { id: row.id }, data: { isActive: false } });
     }
     this.statusCache.set(detail.id, row.id);
     return row.id;

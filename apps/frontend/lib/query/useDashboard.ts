@@ -8,6 +8,7 @@ import {
   ContributorEntry,
   ContributorTab,
   DashboardSummary,
+  SalesTrendPoint,
 } from "@hpl/shared";
 import { api } from "../api/apiClient";
 import { appendDateRange, DateRange } from "../dateRange";
@@ -17,6 +18,13 @@ export function useDashboardSummary(range: DateRange = {}, initialData?: Dashboa
     queryKey: ["dashboard", "summary", range.dateFrom, range.dateTo],
     queryFn: () => api.get<DashboardSummary>(appendDateRange("/api/dashboard/summary", range)),
     initialData: !range.dateFrom && !range.dateTo ? initialData : undefined,
+  });
+}
+
+export function useDashboardRevenueTrend(range: DateRange = {}) {
+  return useQuery({
+    queryKey: ["dashboard", "revenue-trend", range.dateFrom, range.dateTo],
+    queryFn: () => api.get<SalesTrendPoint[]>(appendDateRange("/api/dashboard/revenue-trend?granularity=monthly", range)),
   });
 }
 

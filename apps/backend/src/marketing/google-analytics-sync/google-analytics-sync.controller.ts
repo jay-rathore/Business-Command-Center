@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Post } from "@nestjs/common";
+import { BadGatewayException, BadRequestException, Controller, Get, Post } from "@nestjs/common";
 import { IntegrationProvider } from "@prisma/client";
 import { RequirePermission } from "../../common/decorators/require-permission.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -32,8 +32,10 @@ export class GoogleAnalyticsSyncController {
       await this.connections.recordSuccess(connection.id);
       return result;
     } catch (err) {
-      await this.connections.recordError(connection.id, err instanceof Error ? err.message : String(err));
-      throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      await this.connections.recordError(connection.id, message);
+      // 502, not a bare 500: the failure is the upstream provider's (expired token, outage), and the reason is useful to the operator.
+      throw new BadGatewayException(`Google Analytics sync failed: ${message}`);
     }
   }
 }

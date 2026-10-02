@@ -4,7 +4,6 @@ import { useState } from "react";
 import { CreateOrganizationRequest, CreateOrganizationResponse } from "@hpl/shared";
 import { Button } from "@/components/ui/button";
 import { useCreateOrganization } from "@/lib/query/usePlatformAdmin";
-import { TemporaryPasswordDialog } from "./TemporaryPasswordDialog";
 
 const inputClass = "h-8 w-full rounded-sm border border-border bg-surface px-2 text-xs outline-none focus:border-accent";
 
@@ -18,11 +17,12 @@ function slugify(value: string): string {
 
 const BLANK: CreateOrganizationRequest = { name: "", slug: "", adminName: "", adminEmail: "" };
 
-export function CreateOrganizationForm({ onCreated }: { onCreated?: () => void }) {
+// The one-time password dialog lives in the parent: this form unmounts as soon as it reports success,
+// and a dialog owned by it would vanish with it before the admin password could be read.
+export function CreateOrganizationForm({ onCreated }: { onCreated: (result: CreateOrganizationResponse) => void }) {
   const [value, setValue] = useState<CreateOrganizationRequest>(BLANK);
   const [slugTouched, setSlugTouched] = useState(false);
   const [customPassword, setCustomPassword] = useState("");
-  const [result, setResult] = useState<CreateOrganizationResponse | null>(null);
   const create = useCreateOrganization();
 
   function patch(partial: Partial<CreateOrganizationRequest>) {
@@ -34,11 +34,10 @@ export function CreateOrganizationForm({ onCreated }: { onCreated?: () => void }
     const payload = customPassword ? { ...value, password: customPassword } : value;
     create.mutate(payload, {
       onSuccess: (response) => {
-        setResult(response);
         setValue(BLANK);
         setSlugTouched(false);
         setCustomPassword("");
-        onCreated?.();
+        onCreated(response);
       },
     });
   }
@@ -106,15 +105,6 @@ export function CreateOrganizationForm({ onCreated }: { onCreated?: () => void }
         </div>
       </form>
 
-      {result && (
-        <TemporaryPasswordDialog
-          open={!!result}
-          onOpenChange={(open) => !open && setResult(null)}
-          title={`${result.organization.name} created`}
-          adminEmail={result.adminEmail}
-          temporaryPassword={result.temporaryPassword}
-        />
-      )}
     </>
   );
 }
