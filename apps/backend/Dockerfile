@@ -49,6 +49,11 @@ ENV NODE_ENV=production
 COPY --from=build /app/apps/backend/dist ./dist
 COPY --from=build /app/apps/backend/prisma ./prisma
 COPY --from=build /app/node_modules ./node_modules
+# node_modules/@hpl/shared is a workspace symlink to ../../packages/shared. Without the real package
+# next to it the link dangles, and anything that uses @hpl/shared at RUNTIME (not just for types, which
+# are erased at build time) crashes on start with "Cannot find module '@hpl/shared'" — e.g. the invoice
+# maths (computeTotals / gstSplit / amountInWords).
+COPY --from=build /app/packages/shared ./packages/shared
 COPY --from=build /app/apps/backend/package.json ./package.json
 # db:seed (see package.json's "db:seed" script) and the other one-off scripts under prisma/
 # (set-platform-admin.ts, migrate-env-to-connections.ts) run through ts-node at runtime against

@@ -295,11 +295,16 @@ The frontend build still needs `NEXT_PUBLIC_API_URL` as a build arg, same reason
 into the browser bundle at build time) — just supplied directly here since this step doesn't go
 through Compose or read `.env`.
 
-**One-time, after the first push:** new GHCR packages default to Private. Make both Public so the
-VPS can pull without its own login — on GitHub: your profile → Packages → select the package →
-Package settings → Change visibility → Public. (Keeping them Private and running `docker login
-ghcr.io` on the VPS too, with a read-only token, also works — Public is simpler when the repo
-itself is already public.)
+**Keep the packages PRIVATE.** The images contain your application code and run against real customer
+data, and a registry package that is Public can be downloaded by anyone who knows its name. (This
+exact mistake happened once: a public image shipped a 37 MB customer export because `.dockerignore`
+didn't exclude it. `.dockerignore` now excludes `crm-snapshot/` and `uploads/` — keep it that way, and
+before the first push of any new image, check it: `docker run --rm --entrypoint sh <image> -c 'find / -name "hpl_leads.json"'`
+must print nothing.)
+
+Private packages need a login on the VPS to pull. One-time, on the VPS: create a GitHub token
+(classic) with **only** the `read:packages` scope — never reuse your `write:packages` token there —
+then `docker login ghcr.io -u <github-username>` and paste the token as the password.
 
 **On the VPS**, pull and run — note this uses `docker-compose.deploy.yml`, not
 `docker-compose.prod.yml`:
@@ -352,7 +357,7 @@ docker run --rm --network hpl-network --env-file .env \
 
 # Backend and frontend — names matter here too: .env's INTERNAL_API_URL points at host "backend"
 docker run -d --name backend --network hpl-network --restart unless-stopped --env-file .env \
-  -p 4000:4000 ghcr.io/<github-username>/hpl-command-center-backend:latest
+  -v hpl_uploads:/app/uploads -p 4000:4000 ghcr.io/<github-username>/hpl-command-center-backend:latest
 docker run -d --name frontend --network hpl-network --restart unless-stopped --env-file .env \
   -p 8080:3005 ghcr.io/<github-username>/hpl-command-center-frontend:latest
 ```

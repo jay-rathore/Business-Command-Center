@@ -37,6 +37,10 @@ services:
     env_file: ../.env
     ports:
       - "4000:4000"
+    volumes:
+      # Generated quotation/invoice PDFs and saved business-card images live here. Without a volume
+      # every redeploy would wipe them (and invoices keep absolute file paths, so "send" would break).
+      - uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,3 +58,4 @@ services:
 
 volumes:
   pg_data:
+  uploads:

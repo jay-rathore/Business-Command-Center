@@ -13,3 +13,10 @@ npm-debug.log*
 .env.local
 coverage
 .turbo
+
+# Real customer data. Images get pushed to a registry, so these must never be packaged
+# (the Sept image shipped apps/backend/prisma/crm-snapshot to a public package).
+apps/backend/prisma/crm-snapshot
+**/crm-snapshot
+apps/backend/uploads
+**/uploads
