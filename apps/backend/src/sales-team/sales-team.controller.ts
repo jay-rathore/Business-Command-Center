@@ -1,13 +1,17 @@
-import { Controller, Get, Query } from "@nestjs/common";
+import { Controller, Get, Param, Query } from "@nestjs/common";
 import { RequirePermission } from "../common/decorators/require-permission.decorator";
 import { DateRangeQueryDto } from "../common/dto/date-range-query.dto";
 import { SalesTeamListQueryDto } from "./dto/sales-team-list-query.dto";
 import { SalesTeamService } from "./sales-team.service";
+import { ExecutiveDetailService } from "./executive-detail.service";
 
 @Controller("sales-team")
 @RequirePermission("sales_team:read")
 export class SalesTeamController {
-  constructor(private readonly salesTeamService: SalesTeamService) {}
+  constructor(
+    private readonly salesTeamService: SalesTeamService,
+    private readonly executiveDetail: ExecutiveDetailService,
+  ) {}
 
   @Get()
   findAll(@Query() query: SalesTeamListQueryDto) {
@@ -27,5 +31,11 @@ export class SalesTeamController {
   @Get("follow-up-risk")
   getFollowUpRisk() {
     return this.salesTeamService.getFollowUpRisk();
+  }
+
+  /** Everything one executive has worked on: lead outcomes, sources, trend, revenue, follow-ups, activity. */
+  @Get(":id/overview")
+  getExecutiveOverview(@Param("id") id: string, @Query() query: DateRangeQueryDto) {
+    return this.executiveDetail.getOverview(id, query.dateFrom, query.dateTo);
   }
 }

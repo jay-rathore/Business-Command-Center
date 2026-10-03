@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FollowUpRiskLead, PaginatedResponse, SalesTeamExecutive, SalesTeamKpis, SalesTeamLeaderboardEntry } from "@hpl/shared";
+import { ExecutiveOverview, FollowUpRiskLead, PaginatedResponse, SalesTeamExecutive, SalesTeamKpis, SalesTeamLeaderboardEntry } from "@hpl/shared";
 import { api } from "../api/apiClient";
 import { appendDateRange, DateRange } from "../dateRange";
 import { TableState } from "@/hooks/useTableState";
@@ -46,5 +46,12 @@ export function useSalesTeamFollowUpRisk() {
   return useQuery({
     queryKey: ["sales-team", "follow-up-risk"],
     queryFn: () => api.get<FollowUpRiskLead[]>("/api/sales-team/follow-up-risk"),
+  });
+}
+
+export function useExecutiveOverview(id: string, range: DateRange = {}) {
+  return useQuery({
+    queryKey: ["sales-team", "executive", id, range.dateFrom, range.dateTo],
+    queryFn: () => api.get<ExecutiveOverview>(appendDateRange(`/api/sales-team/${id}/overview`, range)),
   });
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ColumnDef, SortingState } from "@tanstack/react-table";
 import { AlertTriangle, IndianRupee, Target, UserCog, Users } from "lucide-react";
 import { FollowUpRiskLead, PaginatedResponse, SalesTeamExecutive, SalesTeamKpis } from "@hpl/shared";
@@ -28,6 +30,7 @@ export function SalesTeamView({
   initialKpis: SalesTeamKpis | null;
   initialList: PaginatedResponse<SalesTeamExecutive> | null;
 }) {
+  const router = useRouter();
   const { state, setPage, setSort, setQuery } = useTableState({ pageSize: 10, sortBy: "revenue" });
   const debouncedQuery = useDebounce(state.q);
   const { dateFrom, dateTo } = useDateRangeParams();
@@ -42,7 +45,15 @@ export function SalesTeamView({
   const sorting: SortingState = state.sortBy ? [{ id: state.sortBy, desc: state.sortDir === "desc" }] : [];
 
   const columns: ColumnDef<SalesTeamExecutive, any>[] = [
-    { accessorKey: "name", header: "Executive" },
+    {
+      accessorKey: "name",
+      header: "Executive",
+      cell: (c) => (
+        <Link href={`/sales-team/${c.row.original.id}`} className="font-medium text-accent-strong hover:underline" onClick={(e) => e.stopPropagation()}>
+          {c.getValue<string>()}
+        </Link>
+      ),
+    },
     { accessorKey: "designation", header: "Designation", enableSorting: false },
     { accessorKey: "state", header: "State", enableSorting: false, cell: (c) => c.getValue() ?? "—" },
     { accessorKey: "revenue", header: "Revenue", cell: (c) => formatCurrency(c.getValue()) },
@@ -89,7 +100,7 @@ export function SalesTeamView({
       <div>
         <h1 className="font-display text-xl font-semibold text-text-primary">Sales Team</h1>
         <p className="text-sm text-text-muted">
-          Per-executive performance, leaderboard, and follow-up risk {dateFrom || dateTo ? "for the selected range" : "for the current month"}
+          Per-executive performance, leaderboard, and follow-up risk — click an executive for the full breakdown {dateFrom || dateTo ? "for the selected range" : "for the current month"}
         </p>
       </div>
 
@@ -119,6 +130,7 @@ export function SalesTeamView({
           <CardContent>
             {leaderboardQuery.data && leaderboardQuery.data.length > 0 ? (
               <Leaderboard
+                onEntryClick={(execId) => router.push(`/sales-team/${execId}`)}
                 entries={leaderboardQuery.data.map((e, i) => ({
                   id: e.id,
                   rank: i + 1,
@@ -170,6 +182,7 @@ export function SalesTeamView({
           }}
           query={state.q}
           onQueryChange={setQuery}
+          onRowClick={(row) => router.push(`/sales-team/${row.id}`)}
           searchPlaceholder="Search executive name or code…"
           isLoading={listQuery.isLoading}
           isError={listQuery.isError}

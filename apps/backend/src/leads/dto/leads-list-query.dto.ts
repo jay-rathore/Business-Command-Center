@@ -13,6 +13,11 @@ export class LeadsListQueryDto extends ListQueryDto {
   @IsIn(["name", "company", "createdAt", "nextFollowUpAt", "score", "estimatedValue"])
   declare sortBy?: string;
 
+  // Leads assigned to this sales executive.
+  @IsOptional()
+  @IsString()
+  assignedExecId?: string;
+
   // Leads that came from this source (a lead can have several).
   @IsOptional()
   @IsString()

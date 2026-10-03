@@ -21,7 +21,7 @@ import { api } from "../api/apiClient";
 import { appendDateRange, DateRange } from "../dateRange";
 import { TableState } from "@/hooks/useTableState";
 
-function buildQuery(state: TableState & { statusId?: string; sourceId?: string } & DateRange): string {
+function buildQuery(state: TableState & { statusId?: string; sourceId?: string; assignedExecId?: string } & DateRange): string {
   const params = new URLSearchParams();
   params.set("page", String(state.page));
   params.set("pageSize", String(state.pageSize));
@@ -29,6 +29,7 @@ function buildQuery(state: TableState & { statusId?: string; sourceId?: string }
   params.set("sortDir", state.sortDir);
   if (state.q) params.set("q", state.q);
   if (state.sourceId) params.set("sourceId", state.sourceId);
+  if (state.assignedExecId) params.set("assignedExecId", state.assignedExecId);
   if (state.statusId?.startsWith("stage:")) params.set("stage", state.statusId.slice(6));
   else if (state.statusId) params.set("statusId", state.statusId);
   if (state.dateFrom) params.set("dateFrom", state.dateFrom);
@@ -37,7 +38,7 @@ function buildQuery(state: TableState & { statusId?: string; sourceId?: string }
 }
 
 export function useLeadsList(
-  state: TableState & { statusId?: string; sourceId?: string } & DateRange,
+  state: TableState & { statusId?: string; sourceId?: string; assignedExecId?: string } & DateRange,
   initialData?: PaginatedResponse<LeadListItem>,
 ) {
   return useQuery({
@@ -45,7 +46,7 @@ export function useLeadsList(
     queryFn: () => api.get<PaginatedResponse<LeadListItem>>(`/api/leads?${buildQuery(state)}`),
     placeholderData: (prev) => prev,
     initialData:
-      state.page === 1 && !state.sortBy && !state.q && !state.statusId && !state.sourceId && !state.dateFrom && !state.dateTo ? initialData : undefined,
+      state.page === 1 && !state.sortBy && !state.q && !state.statusId && !state.sourceId && !state.assignedExecId && !state.dateFrom && !state.dateTo ? initialData : undefined,
   });
 }
 

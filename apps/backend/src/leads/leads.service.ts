@@ -78,12 +78,13 @@ export class LeadsService {
   ) {}
 
   async findAll(query: LeadsListQueryDto): Promise<PaginatedResponse<LeadListItem>> {
-    const { page, pageSize, sortBy, sortDir, q, statusId, stage, sourceId, dateFrom, dateTo } = query;
+    const { page, pageSize, sortBy, sortDir, q, statusId, stage, sourceId, assignedExecId, dateFrom, dateTo } = query;
 
     const where: Prisma.LeadWhereInput = {
       ...(statusId ? { statusId } : {}),
       ...(stage ? { status: { stage } } : {}),
       ...(sourceId ? { sources: { some: { leadSourceId: sourceId } } } : {}),
+      ...(assignedExecId ? { assignedExecId } : {}),
       ...(q
         ? {
             OR: [
@@ -219,8 +220,8 @@ export class LeadsService {
 
   /** Every lead in range lands in exactly one bucket (by its CURRENT status), so the counts add up to
    * the total — "how many came in, how many were worked, how many were lost and why". */
-  async getOutcomes(dateFrom?: string, dateTo?: string): Promise<LeadOutcomes> {
-    const range = dateRangeWhere("createdAt", dateFrom, dateTo);
+  async getOutcomes(dateFrom?: string, dateTo?: string, assignedExecId?: string): Promise<LeadOutcomes> {
+    const range = { ...dateRangeWhere("createdAt", dateFrom, dateTo), ...(assignedExecId ? { assignedExecId } : {}) };
     const [{ statusById, bucketOf }, counts] = await Promise.all([
       this.getBucketResolver(),
       this.prisma.lead.groupBy({ by: ["statusId"], where: range, _count: { _all: true } }),
@@ -277,7 +278,7 @@ export class LeadsService {
   /** Per-source outcomes: how many leads each source brought, how many got worked / turned interested /
    * won / lost, and a rating against the whole pipeline's rates. Raw SQL because Prisma can't group a
    * join table by the lead's status; org + soft-delete are filtered by hand (raw SQL bypasses the extensions). */
-  async getSourcePerformance(dateFrom?: string, dateTo?: string): Promise<LeadSourcePerformance> {
+  async getSourcePerformance(dateFrom?: string, dateTo?: string, assignedExecId?: string): Promise<LeadSourcePerformance> {
     const from = dateFrom ? parseDateOnly(dateFrom) : null;
     const to = dateTo ? endOfDay(parseDateOnly(dateTo)) : null;
     const organizationId = TenantContext.get().organizationId;
@@ -293,6 +294,7 @@ export class LeadsService {
           AND l."deletedAt" IS NULL
           AND (${from}::timestamp IS NULL OR l."createdAt" >= ${from})
           AND (${to}::timestamp IS NULL OR l."createdAt" <= ${to})
+          AND (${assignedExecId ?? null}::text IS NULL OR l."assignedExecId" = ${assignedExecId ?? null})
         GROUP BY s."id", s."name", l."statusId"`,
       this.getOutcomes(dateFrom, dateTo),
     ]);
