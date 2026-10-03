@@ -14,8 +14,13 @@ test.beforeAll(async () => {
 });
 
 test("integration connections never leak secrets", async () => {
-  const body = await (await api.get("integration-connections")).text();
-  expect(body).not.toMatch(/token|secret|password|api[_-]?key|credentials/i);
+  // Check WHICH FIELDS come back, not the words in the values: error messages legitimately contain
+  // words like "token" (e.g. a failing oauth2.googleapis.com/token URL) without being a secret.
+  const conns = await (await api.get("integration-connections")).json();
+  expect(conns.length).toBeGreaterThan(0);
+  for (const c of conns) {
+    expect(Object.keys(c).sort(), c.provider).toEqual(["id", "isActive", "lastSyncError", "lastSyncedAt", "provider", "updatedAt"]);
+  }
 });
 
 test("integration health: report any connection whose last sync failed", async () => {
