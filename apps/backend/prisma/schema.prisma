@@ -321,6 +321,9 @@ model Organization {
   leadCounter                LeadCounter?
   quotations                 Quotation[]
   quotationItems             QuotationItem[]
+  invoiceCounter             InvoiceCounter?
+  invoices                   Invoice[]
+  invoiceItems               InvoiceItem[]
   leadSourceOnLeads          LeadSourceOnLead[]
   integrationConnections     IntegrationConnection[]
 
@@ -422,6 +425,7 @@ model SalesExecutive {
   complaints        Complaint[]
   warrantyClaims    WarrantyClaim[]
   quotations        Quotation[]
+  invoices          Invoice[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -509,6 +513,7 @@ model Lead {
   activities   LeadActivity[]
   attributions MarketingLeadAttribution[]
   quotations   Quotation[]
+  invoices     Invoice[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -838,6 +843,7 @@ model Product {
   complaints     Complaint[]
   warrantyClaims WarrantyClaim[]
   quotationItems QuotationItem[]
+  invoiceItems   InvoiceItem[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1288,6 +1294,7 @@ model CompanyProfile {
   validityDays                 Int          @default(30)
 
   quotations Quotation[]
+  invoices   Invoice[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1366,6 +1373,7 @@ model Quotation {
   createdBy   SalesExecutive? @relation(fields: [createdById], references: [id])
 
   items QuotationItem[]
+  invoice Invoice?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1418,4 +1426,115 @@ model IntegrationConnection {
 
   @@unique([organizationId, provider])
   @@index([provider, isActive])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Invoices — raised from a quotation once the customer confirms (often after negotiating the price).
+// The tax invoice carries the AGREED line items; the original quotation is never edited, so the
+// negotiation stays auditable (InvoiceItem.quoted* keep what was originally offered). One invoice per
+// quotation. Delivery status reuses the quotation status enums (DRAFT/SENT/SEND_FAILED, email SENT/FAILED).
+// ─────────────────────────────────────────────────────────────────────────
+
+// Per-tenant race-free sequence for INV-<year>-<seq> codes. Mirrors QuotationCounter.
+model InvoiceCounter {
+  organizationId String       @id
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  seq            Int          @default(0)
+}
+
+model Invoice {
+  id               String         @id @default(cuid())
+  organizationId   String
+  organization     Organization   @relation(fields: [organizationId], references: [id])
+  invoiceCode      String
+  quotationId      String
+  quotation        Quotation      @relation(fields: [quotationId], references: [id])
+  leadId           String
+  lead             Lead           @relation(fields: [leadId], references: [id])
+  companyProfileId String
+  companyProfile   CompanyProfile @relation(fields: [companyProfileId], references: [id])
+
+  // Customer is snapshotted (like Quotation) so a printed invoice never drifts when the Lead changes.
+  customerName    String
+  customerCompany String?
+  customerAddress String
+  customerCity    String
+  customerState   String
+  customerGstin   String?
+  customerContact String
+
+  invoiceDate DateTime @default(now())
+  dueDate     DateTime
+
+  subtotal    Decimal @db.Decimal(14, 2)
+  gstAmount   Decimal @db.Decimal(14, 2)
+  roundoff    Decimal @db.Decimal(14, 2)
+  totalAmount Decimal @db.Decimal(14, 2)
+
+  advancePercent        Int
+  beforeDispatchPercent Int
+  advanceAmount         Decimal @db.Decimal(14, 2)
+  beforeDispatchAmount  Decimal @db.Decimal(14, 2)
+
+  termsAndConditions String
+
+  // What the quotation said vs what was agreed.
+  quotedTotalAmount Decimal  @db.Decimal(14, 2)
+  isNegotiated      Boolean  @default(false)
+  negotiationNote   String?
+  // Code of the revised quotation sent alongside the invoice (e.g. PI-2026-0001-R1); null when the
+  // original quotation went unchanged.
+  revisedQuotationCode String?
+
+  status QuotationStatus @default(DRAFT)
+
+  pdfPath          String? // the tax invoice
+  quotationPdfPath String? // the updated quotation attached to it (revised, or the original if unchanged)
+
+  sentToPhone       String?
+  whatsappMessageId String?
+  sentAt            DateTime?
+
+  emailSentTo String?
+  emailSentAt DateTime?
+  emailStatus QuotationEmailStatus?
+
+  createdById String?
+  createdBy   SalesExecutive? @relation(fields: [createdById], references: [id])
+
+  items InvoiceItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, invoiceCode])
+  @@unique([quotationId])
+  @@index([organizationId, leadId])
+}
+
+model InvoiceItem {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  invoiceId      String
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  srNo           Int
+  productId      String?
+  product        Product?     @relation(fields: [productId], references: [id])
+  itemName       String
+  hsnCode        String?
+  quantity       Int
+  unitRate       Decimal      @db.Decimal(10, 2)
+  taxPercent     Decimal      @default(18) @db.Decimal(5, 2)
+  lineAmount     Decimal      @db.Decimal(14, 2)
+  lineTax        Decimal      @db.Decimal(14, 2)
+  lineTotal      Decimal      @db.Decimal(14, 2)
+
+  // The quotation line this one came from (no FK: it is only a pointer so an edit can re-link lines),
+  // plus what that line originally offered. Null for a line added during negotiation.
+  quotationItemId String?
+  quotedQuantity Int?
+  quotedUnitRate Decimal? @db.Decimal(10, 2)
+
+  @@index([organizationId, invoiceId])
 }

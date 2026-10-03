@@ -17,3 +17,9 @@ export function formatPercent(value: number | null | undefined, { signed = false
   const sign = signed && value > 0 ? "+" : "";
   return `${sign}${value.toFixed(1)}%`;
 }
+
+/** Exact rupees with Indian digit grouping (₹18,880.00) — for invoices, where an abbreviated "₹18.9K" is not acceptable. */
+export function formatRupees(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  return `₹${value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}

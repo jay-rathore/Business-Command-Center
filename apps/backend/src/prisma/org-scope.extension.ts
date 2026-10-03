@@ -51,6 +51,9 @@ const ORG_SCOPED_MODELS = new Set([
   'LeadCounter',
   'Quotation',
   'QuotationItem',
+  'InvoiceCounter',
+  'Invoice',
+  'InvoiceItem',
   'IntegrationConnection',
 ]);
 

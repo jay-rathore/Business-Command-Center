@@ -18,6 +18,7 @@ import { LeadsModule } from './leads/leads.module';
 import { ProjectsModule } from './projects/projects.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { QuotationsModule } from './quotations/quotations.module';
+import { InvoicesModule } from './invoices/invoices.module';
 import { CompanyProfilesModule } from './company-profiles/company-profiles.module';
 import { IntegrationConnectionsModule } from './integration-connections/integration-connections.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
@@ -53,6 +54,7 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
     WhatsAppModule,
     CompanyProfilesModule,
     QuotationsModule,
+    InvoicesModule,
     IntegrationConnectionsModule,
     PlatformAdminModule,
   ],

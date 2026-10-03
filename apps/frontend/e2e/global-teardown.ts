@@ -9,6 +9,8 @@ export default function globalTeardown() {
   const sql = `
     begin;
     create temp table _q as select distinct "quotationId" as id from "QuotationItem" where "itemName" in ('E2E HPL Sheet', 'UI E2E Sheet');
+    delete from "InvoiceItem" where "invoiceId" in (select id from "Invoice" where "quotationId" in (select id from _q));
+    delete from "Invoice" where "quotationId" in (select id from _q);
     delete from "QuotationItem" where "quotationId" in (select id from _q);
     delete from "Quotation" where id in (select id from _q);
     delete from "CompanyProfile" where label like 'E2E %';

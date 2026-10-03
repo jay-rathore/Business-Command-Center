@@ -13,12 +13,26 @@ export class EmailService {
 
   async sendQuotationEmail(
     credentials: EmailSmtpCredentials,
+    params: { to: string; subject: string; bodyText: string; attachmentBuffer: Buffer; attachmentFilename: string },
+  ): Promise<void> {
+    await this.sendDocumentsEmail(credentials, {
+      to: params.to,
+      subject: params.subject,
+      bodyText: params.bodyText,
+      attachments: [{ filename: params.attachmentFilename, buffer: params.attachmentBuffer }],
+      failureMessage: "Failed to send the quotation via email",
+    });
+  }
+
+  /** Sends one email with any number of PDF attachments (e.g. an invoice plus its updated quotation). */
+  async sendDocumentsEmail(
+    credentials: EmailSmtpCredentials,
     params: {
       to: string;
       subject: string;
       bodyText: string;
-      attachmentBuffer: Buffer;
-      attachmentFilename: string;
+      attachments: { filename: string; buffer: Buffer }[];
+      failureMessage?: string;
     },
   ): Promise<void> {
     const transporter = createTransport({
@@ -39,13 +53,11 @@ export class EmailService {
         to: params.to,
         subject: params.subject,
         text: params.bodyText,
-        attachments: [
-          { filename: params.attachmentFilename, content: params.attachmentBuffer, contentType: "application/pdf" },
-        ],
+        attachments: params.attachments.map((a) => ({ filename: a.filename, content: a.buffer, contentType: "application/pdf" })),
       });
     } catch (err) {
       this.logger.error(`Email send failed: ${err instanceof Error ? err.message : err}`);
-      throw new InternalServerErrorException("Failed to send the quotation via email");
+      throw new InternalServerErrorException(params.failureMessage ?? "Failed to send the email");
     }
   }
 }

@@ -1,4 +1,5 @@
 import { QuotationEmailStatus, QuotationInputMode, QuotationStatus } from "../enums";
+import type { QuotationInvoiceSummary } from "./invoices";
 
 // Non-sensitive subset used by the quotation form's picker — deliberately excludes bank/GSTIN
 // details (see company-profiles.service.ts findOptions()) since roles that can create
@@ -104,6 +105,7 @@ export interface CreateQuotationRequest {
 }
 
 export interface QuotationItemLine {
+  id: string;
   srNo: number;
   productId: string | null;
   itemName: string;
@@ -132,6 +134,8 @@ export interface QuotationListItem {
   emailSentTo: string | null;
   emailSentAt: string | null;
   emailStatus: QuotationEmailStatus | null;
+  /** Set once an invoice has been raised from this quotation. */
+  invoice?: QuotationInvoiceSummary | null;
 }
 
 export interface QuotationDetail extends QuotationListItem {

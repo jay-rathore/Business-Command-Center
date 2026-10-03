@@ -14,5 +14,6 @@ import { QuotationPdfService } from "./quotation-pdf.service";
   imports: [LeadsModule, CompanyProfilesModule, WhatsAppModule, EmailModule, IntegrationConnectionsModule],
   controllers: [QuotationsController],
   providers: [QuotationsService, QuotationNumberingService, QuotationAiParserService, QuotationPdfService],
+  exports: [QuotationPdfService],
 })
 export class QuotationsModule {}

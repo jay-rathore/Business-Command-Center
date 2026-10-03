@@ -10,6 +10,8 @@ import { useDrawerStore } from "@/lib/stores/drawerStore";
 import { DataTable } from "@/components/shared/DataTable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { InvoicesPanel } from "@/components/invoices/InvoicesPanel";
 import { formatCurrency } from "@/lib/format";
 import { NewQuotationDialog } from "./NewQuotationDialog";
 import { SendQuotationDialog } from "./SendQuotationDialog";
@@ -70,6 +72,15 @@ export function QuotationsView({ initialList }: { initialList: PaginatedResponse
       },
     },
     {
+      id: "invoice",
+      header: "Invoice",
+      enableSorting: false,
+      cell: (c) => {
+        const invoice = c.row.original.invoice;
+        return invoice ? <Badge variant={invoice.status === "SENT" ? "good" : "accent"}>{invoice.invoiceCode}</Badge> : <span className="text-text-muted">—</span>;
+      },
+    },
+    {
       accessorKey: "quotationDate",
       header: "Date",
       // Fixed timeZone so SSR (container, usually UTC) and client hydration (browser's local
@@ -90,13 +101,19 @@ export function QuotationsView({ initialList }: { initialList: PaginatedResponse
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-xl font-semibold text-text-primary">Quotations</h1>
-          <p className="text-sm text-text-muted">Every quotation generated across all leads — search, resend, or start a new one.</p>
+          <p className="text-sm text-text-muted">Quotations for pricing confirmation, and the invoices raised once customers confirm.</p>
         </div>
         <Button type="button" onClick={() => setPickerOpen(true)}>
           + New Quotation
         </Button>
       </div>
 
+      <Tabs defaultValue="quotations" className="flex flex-col gap-4">
+        <TabsList className="w-fit">
+          <TabsTrigger value="quotations">Quotations</TabsTrigger>
+          <TabsTrigger value="invoices">Invoices</TabsTrigger>
+        </TabsList>
+        <TabsContent value="quotations" className="flex flex-col gap-6">
       <DataTable
         columns={columns}
         data={listQuery.data?.data ?? []}
@@ -117,6 +134,11 @@ export function QuotationsView({ initialList }: { initialList: PaginatedResponse
         onRetry={() => listQuery.refetch()}
         emptyMessage="No quotations yet — click New Quotation to send your first one."
       />
+        </TabsContent>
+        <TabsContent value="invoices">
+          <InvoicesPanel />
+        </TabsContent>
+      </Tabs>
 
       <NewQuotationDialog
         open={pickerOpen}

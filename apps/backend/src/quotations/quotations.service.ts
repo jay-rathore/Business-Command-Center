@@ -26,6 +26,8 @@ import { CreateQuotationDto } from "./dto/create-quotation.dto";
 import { ParseQuotationTextDto } from "./dto/parse-quotation-text.dto";
 import { QuotationsListQueryDto } from "./dto/quotations-list-query.dto";
 
+const INVOICE_SUMMARY = { select: { id: true, invoiceCode: true, status: true, totalAmount: true } } as const;
+
 @Injectable()
 export class QuotationsService {
   constructor(
@@ -75,7 +77,7 @@ export class QuotationsService {
   }
 
   async listForLead(leadId: string): Promise<QuotationListItem[]> {
-    const rows = await this.prisma.quotation.findMany({ where: { leadId }, orderBy: { createdAt: "desc" } });
+    const rows = await this.prisma.quotation.findMany({ where: { leadId }, include: { invoice: INVOICE_SUMMARY }, orderBy: { createdAt: "desc" } });
     return rows.map(this.toListItem);
   }
 
@@ -106,7 +108,7 @@ export class QuotationsService {
     const [rows, total] = await Promise.all([
       this.prisma.quotation.findMany({
         where,
-        include: { lead: { select: { name: true, company: true } } },
+        include: { lead: { select: { name: true, company: true } }, invoice: INVOICE_SUMMARY },
         orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -123,7 +125,7 @@ export class QuotationsService {
   }
 
   async findOne(id: string): Promise<QuotationDetail> {
-    const row = await this.prisma.quotation.findUnique({ where: { id }, include: { items: { orderBy: { srNo: "asc" } } } });
+    const row = await this.prisma.quotation.findUnique({ where: { id }, include: { items: { orderBy: { srNo: "asc" } }, invoice: INVOICE_SUMMARY } });
     if (!row) throw new NotFoundException("Quotation not found");
     return this.toDetail(row);
   }
@@ -360,6 +362,7 @@ export class QuotationsService {
     emailSentTo: string | null;
     emailSentAt: Date | null;
     emailStatus: string | null;
+    invoice?: { id: string; invoiceCode: string; status: string; totalAmount: unknown } | null;
   }): QuotationListItem => ({
     id: row.id,
     quotationCode: row.quotationCode,
@@ -374,6 +377,9 @@ export class QuotationsService {
     emailSentTo: row.emailSentTo,
     emailSentAt: row.emailSentAt ? row.emailSentAt.toISOString() : null,
     emailStatus: row.emailStatus as QuotationListItem["emailStatus"],
+    invoice: row.invoice
+      ? { id: row.invoice.id, invoiceCode: row.invoice.invoiceCode, status: row.invoice.status as QuotationListItem["status"], totalAmount: Number(row.invoice.totalAmount) }
+      : null,
   });
 
   private toDetail = (row: {
@@ -407,7 +413,9 @@ export class QuotationsService {
     emailSentAt: Date | null;
     emailStatus: string | null;
     whatsappMessageId: string | null;
+    invoice?: { id: string; invoiceCode: string; status: string; totalAmount: unknown } | null;
     items: {
+      id: string;
       srNo: number;
       productId: string | null;
       itemName: string;
@@ -444,7 +452,11 @@ export class QuotationsService {
       gstin: row.customerGstin,
       contact: row.customerContact,
     },
+    invoice: row.invoice
+      ? { id: row.invoice.id, invoiceCode: row.invoice.invoiceCode, status: row.invoice.status as QuotationDetail["status"], totalAmount: Number(row.invoice.totalAmount) }
+      : null,
     items: row.items.map((i) => ({
+      id: i.id,
       srNo: i.srNo,
       productId: i.productId,
       itemName: i.itemName,

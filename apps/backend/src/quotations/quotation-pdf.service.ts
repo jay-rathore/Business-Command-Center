@@ -31,6 +31,9 @@ export interface QuotationPdfData {
   beforeDispatchPercent: number;
   beforeDispatchAmount: number;
   termsAndConditions: string;
+  /** Defaults to PROFORMA INVOICE; the updated quotation sent with an invoice says REVISED. */
+  title?: string;
+  revisionNote?: string;
 }
 
 const UPLOAD_DIR = join(process.cwd(), "uploads", "quotations");
@@ -67,6 +70,8 @@ export class QuotationPdfService {
   async generate(data: QuotationPdfData): Promise<{ buffer: Buffer; pdfPath: string }> {
     const html = this.getTemplate()({
       quotationCode: data.quotationCode,
+      title: data.title ?? "PROFORMA INVOICE",
+      revisionNote: data.revisionNote,
       quotationDateFormatted: formatDate(data.quotationDate),
       validUntilFormatted: formatDate(data.validUntil),
       company: data.company,

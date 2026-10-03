@@ -6,6 +6,7 @@ import { CampaignDrawerContent } from "@/components/marketing/CampaignDrawerCont
 import { LeadDrawerContent } from "@/components/leads/LeadDrawerContent";
 import { ProjectDrawerContent } from "@/components/projects/ProjectDrawerContent";
 import { QuotationDrawerContent } from "@/components/quotations/QuotationDrawerContent";
+import { InvoiceDrawerContent } from "@/components/invoices/InvoiceDrawerContent";
 import { ArchitectDrawerContent } from "@/components/architects/ArchitectDrawerContent";
 import { BuilderDrawerContent } from "@/components/builders/BuilderDrawerContent";
 
@@ -18,6 +19,7 @@ export const drawerRegistry: Record<string, ComponentType<{ data: any }>> = {
   lead: LeadDrawerContent,
   project: ProjectDrawerContent,
   quotation: QuotationDrawerContent,
+  invoice: InvoiceDrawerContent,
   architect: ArchitectDrawerContent,
   builder: BuilderDrawerContent,
 };
